@@ -16,20 +16,50 @@ from modulos.motor_gps import (
     generar_tramo_realista_por_sector
 )
 
-# 1. Configuración de la página (Framework Digital Gob.cl)
-st.set_page_config(layout="wide", page_title="S.V.R. — Gobierno de Chile", page_icon="🇨🇱")
+# 1. Configuración de página e Identidad Institucional
+st.set_page_config(layout="wide", page_title="S.V.R. — Ministerio de Transportes", page_icon="🇨🇱")
 
-# Estilos CSS del Framework Digital de Chile (Colores oficiales Azul #0033A0 y Rojo #EF3340)
+# 2. Inyección de CSS Avanzado del Framework Digital Gob.cl
 st.markdown("""
     <style>
-        /* Estilización general basada en framework.digital.gob.cl */
+        /* Tipografía oficial y fondo de la aplicación */
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
         
-        html, body, [data-testid="stSidebar"] {
+        html, body, [data-testid="stAppViewContainer"] {
             font-family: 'Roboto', sans-serif;
+            background-color: #F8F9FA !important;
         }
         
-        /* Modificar el botón principal del sistema */
+        /* Ocultar elementos nativos de Streamlit para mayor formalidad */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* Estilización de las Tarjetas Métricas (KPI Cards) */
+        .kpi-container {
+            background-color: #FFFFFF;
+            border-left: 5px solid #0033A0;
+            border-radius: 4px;
+            padding: 15px 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 15px;
+        }
+        .kpi-title {
+            color: #666666;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+        .kpi-value {
+            color: #0033A0;
+            font-size: 1.8rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        
+        /* Estilización de Botones Institucionales (Azul Gobierno) */
         div.stButton > button:first-child {
             background-color: #0033A0 !important;
             color: white !important;
@@ -37,28 +67,35 @@ st.markdown("""
             border: none !important;
             font-weight: 500 !important;
             padding: 0.6rem 1.2rem !important;
-            transition: background-color 0.2s ease;
+            width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         div.stButton > button:first-child:hover {
             background-color: #002266 !important;
-            border: none !important;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
         }
         
-        /* Botones secundarios o de alerta lateral */
-        .stDownloadButton > button {
-            background-color: #ffffff !important;
-            color: #0033A0 !important;
-            border: 1px solid #0033A0 !important;
-            border-radius: 4px !important;
+        /* Estilización de la Barra Lateral */
+        [data-testid="stSidebar"] {
+            background-color: #FFFFFF !important;
+            border-right: 1px solid #E5E5E5 !important;
         }
-        .stDownloadButton > button:hover {
-            background-color: #f4f6f9 !important;
-            color: #002266 !important;
+        
+        /* Estilización de pestañas (Tabs) */
+        button[data-baseweb="tab"] {
+            font-size: 1rem !important;
+            font-weight: 500 !important;
+            color: #555555 !important;
+        }
+        button[aria-selected="true"] {
+            color: #0033A0 !important;
+            border-bottom-color: #0033A0 !important;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# Inicialización de Estados
+# Inicialización de Estados Globales
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'role' not in st.session_state: st.session_state.role = None
 if 'alertas' not in st.session_state: st.session_state.alertas = []
@@ -66,27 +103,30 @@ if 'buses_en_vivo' not in st.session_state: st.session_state.buses_en_vivo = []
 if 'historial_ok' not in st.session_state: st.session_state.historial_ok = []
 if 'alerta_focus' not in st.session_state: st.session_state.alerta_focus = None
 
-# --- PANTALLA DE LOGIN INSTITUCIONAL ---
+# --- VISTA 1: PANTALLA DE LOGIN GOB.CL ---
 def pantalla_login():
-    # Header del Gobierno para el Login
-    st.markdown("""
-        <div style="background-color: #0033A0; padding: 20px; border-bottom: 5px solid #EF3340; text-align: center; color: white; border-radius: 6px 6px 0 0; margin-top: 40px;">
-            <span style="font-weight: 300; font-size: 0.9rem; letter-spacing: 2px;">GOBIERNO DE CHILE</span><br>
-            <h2 style="margin: 5px 0 0 0; color: white; font-size: 1.8rem; font-weight: 700;">Plataforma de Validación en Red (S.V.R)</h2>
-            <p style="margin: 5px 0 0 0; opacity: 0.8; font-size: 0.9rem;">División de Transporte Público Regional — Región de O'Higgins</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
     
-    col1, col2, col3 = st.columns([1, 1.8, 1])
-    with col2:
+    with col_l2:
+        # Contenedor del Escudo y Encabezado
+        st.markdown("""
+            <div style="background-color: #0033A0; padding: 30px; border-bottom: 5px solid #EF3340; text-align: center; color: white; border-radius: 6px 6px 0 0;">
+                <span style="font-weight: bold; font-size: 0.85rem; letter-spacing: 2px; opacity: 0.85;">MINISTERIO DE TRANSPORTES Y TELECOMUNICACIONES</span><br>
+                <h2 style="margin: 10px 0 0 0; color: white; font-size: 1.7rem; font-weight: 700;">Sistema de Validación en Red (S.V.R)</h2>
+                <p style="margin: 5px 0 0 0; opacity: 0.75; font-size: 0.9rem;">Subsecretaría de Transportes — Región de O'Higgins</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Formulario de Acceso Seguro
         with st.container(border=True):
-            st.markdown("<p style='text-align: center; font-weight: 500; color: #333; margin-top: 10px;'>Control de Acceso de Funcionarios</p>", unsafe_allow_html=True)
-            with st.form("Formulario_Gob"):
-                usuario = st.text_input("📍 Identificador Institucional (Usuario)", placeholder="ejemplo.r")
-                contrasena = st.text_input("🔒 Contraseña de Seguridad", type="password", placeholder="••••••••")
-                
+            st.markdown("<p style='text-align: center; font-weight: 500; color: #444; margin-top: 10px;'>Portal Único de Autenticación de Funcionarios</p>", unsafe_allow_html=True)
+            with st.form("Formulario_Gob_Login"):
+                usuario = st.text_input("📍 Clave Única o Usuario Institucional", placeholder="ejemplo.funcionario")
+                contrasena = st.text_input("🔒 Contraseña del Sistema", type="password", placeholder="••••••••")
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.form_submit_button("Autenticar e Ingresar al Sistema", use_container_width=True):
+                
+                if st.form_submit_button("Autenticar e Ingresar al Panel"):
                     if usuario == "admin" and contrasena == "rancagua2026":
                         st.session_state.logged_in = True
                         st.session_state.role = "admin"
@@ -96,70 +136,62 @@ def pantalla_login():
                         st.session_state.role = "visor"
                         st.rerun()
                     else:
-                        st.error("Credenciales del sistema incorrectas. Intente nuevamente.")
-            st.caption("⚠️ Uso estrictamente reservado para personal analista del Ministerio de Transportes y Telecomunicaciones.")
+                        st.error("Credenciales incorrectas o usuario no registrado en el perímetro.")
+            st.caption("⚠️ El acceso no autorizado a este sistema estatal está penalizado según la normativa de seguridad vigente.")
 
-# --- INICIO DE INTERFAZ AUTENTICADA ---
+# --- VISTA 2: PLATAFORMA PRINCIPAL AUTENTICADA ---
 if not st.session_state.logged_in:
     pantalla_login()
 else:
-    # --- BANNER SUPERIOR OFICIAL (DISEÑO FRAMEWORK DIGITAL DE CHILE) ---
+    # Banner Superior Oficial Gob.cl
     st.markdown("""
-        <div style="background-color: #0033A0; padding: 16px 24px; border-bottom: 4px solid #EF3340; color: white; display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.08);">
+        <div style="background-color: #0033A0; padding: 15px 25px; border-bottom: 4px solid #EF3340; color: white; display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <div>
-                <span style="font-weight: bold; font-size: 0.8rem; letter-spacing: 1.5px; opacity: 0.9;">GOBIERNO DE CHILE</span><br>
-                <span style="font-size: 1.3rem; font-weight: 700; color: white;">Sistema de Validación en Red — S.V.R Rancagua</span>
+                <span style="font-weight: bold; font-size: 0.75rem; letter-spacing: 1.5px; opacity: 0.85;">GOBIERNO DE CHILE</span><br>
+                <span style="font-size: 1.4rem; font-weight: 700; color: white;">Subsecretaría de Transportes — División de Fiscalización</span>
             </div>
-            <div style="text-align: right; opacity: 0.9;">
-                <span style="font-size: 0.85rem; font-weight: 400; display: block;">Ministerio de Transportes y Telecomunicaciones</span>
-                <span style="font-size: 0.75rem; font-weight: 300; display: block; background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; margin-top: 3px; text-align: center;">Regulación Perímetro de Exclusión</span>
+            <div style="text-align: right; opacity: 0.95;">
+                <span style="font-size: 0.85rem; font-weight: 500; display: block;">Perímetro de Exclusión Rancagua</span>
+                <span style="font-size: 0.75rem; font-weight: 300; display: block; background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 3px; margin-top: 3px; text-align: center;">Módulo S.V.R Regulado</span>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    # Botón de cierre de sesión reposicionado arriba de manera discreta
-    col_vacia, col_logout = st.columns([8.5, 1.5])
-    with col_logout:
-        if st.button("🔒 Cerrar Sesión Segura", use_container_width=True):
+    # Botón de desconexión institucional
+    c_vacia, c_logout = st.columns([8.5, 1.5])
+    with c_logout:
+        if st.button("🔒 Cerrar Sesión", key="btn_logout"):
             st.session_state.logged_in = False
             st.session_state.role = None
             st.rerun()
 
-    # Barra lateral de Ingesta Institucional
-    st.sidebar.markdown("<h3 style='color: #0033A0; margin-bottom:0;'>⚙️ Ingesta de Datos</h3>", unsafe_allow_html=True)
-    st.sidebar.markdown("<p style='font-size:0.85rem; color:gray; margin-top:0;'>Marco Regulado de Electromovilidad</p>", unsafe_allow_html=True)
+    # Barra Lateral Administrativa
+    st.sidebar.markdown("<h3 style='color: #0033A0; margin-bottom: 0;'>⚙️ Parámetros</h3>", unsafe_allow_html=True)
+    st.sidebar.markdown("<p style='font-size:0.85rem; color:gray; margin-top: 0; margin-bottom: 15px;'>Ingesta de Datos y Cartografía</p>", unsafe_allow_html=True)
     
     archivos_kmz_procesar = []
     archivo_padron = None
-    archivo_gtfs = None 
 
     if st.session_state.role == "admin":
-        st.sidebar.markdown("<span style='background-color: #e6f0fa; color: #0033A0; padding: 3px 8px; border-radius: 3px; font-size: 0.8rem; font-weight: 500;'>Rol: Administrador Central</span>", unsafe_allow_html=True)
-        st.sidebar.write("")
-        archivos_kmz_crudos = st.sidebar.file_uploader("1. Archivos KMZ Oficiales", type=["kmz"], accept_multiple_files=True)
+        st.sidebar.markdown("<span style='background-color: #E6F0FA; color: #0033A0; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 500; display: block; text-align: center;'>Perfil: Administrador</span><br>", unsafe_allow_html=True)
+        archivos_kmz_crudos = st.sidebar.file_uploader("1. Cartografía Oficial (KMZ)", type=["kmz"], accept_multiple_files=True)
         if archivos_kmz_crudos:
             archivos_kmz_procesar = [(f.name, f) for f in sorted(archivos_kmz_crudos, key=lambda f: f.name)]
         archivo_gtfs = st.sidebar.file_uploader("2. GTFS Regulado (.zip)", type=["zip"])
         archivo_padron = st.sidebar.file_uploader("3. Padrón de Patentes (.xlsx)", type=["xlsx"])
-        
     elif st.session_state.role == "visor":
-        st.sidebar.markdown("<span style='background-color: #f5f5f5; color: #333; padding: 3px 8px; border-radius: 3px; font-size: 0.8rem; font-weight: 500;'>Rol: Inspector / Visor</span>", unsafe_allow_html=True)
-        st.sidebar.write("")
+        st.sidebar.markdown("<span style='background-color: #F0F0F0; color: #444444; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 500; display: block; text-align: center;'>Perfil: Visor Institucional</span><br>", unsafe_allow_html=True)
         carpeta_datos = "datos"
         if os.path.exists(carpeta_datos):
             archivos_locales = os.listdir(carpeta_datos)
             kmz_locales = sorted([f for f in archivos_locales if f.lower().endswith('.kmz')])
             padron_local = [f for f in archivos_locales if f.lower().endswith('.xlsx') or f.lower().endswith('.xls')]
-            
-            if not kmz_locales: st.sidebar.warning("⚠️ Sin archivos KMZ en servidor.")
-            if not padron_local: st.sidebar.warning("⚠️ Sin Padrón Excel en servidor.")
-                
             archivos_kmz_procesar = [(nombre, os.path.join(carpeta_datos, nombre)) for nombre in kmz_locales]
             if padron_local: archivo_padron = os.path.join(carpeta_datos, padron_local[0])
         else:
-            st.sidebar.error("❌ Carpeta de datos del servidor ausente.")
+            st.sidebar.error("Carpeta local de datos no encontrada en el servidor.")
 
-    # --- PROCESAMIENTO DE ARCHIVOS ---
+    # Procesar archivos e Ingesta de Datos
     lineas_dict = {}
     if archivos_kmz_procesar:
         for nombre_archivo, archivo_o_ruta in archivos_kmz_procesar:
@@ -171,11 +203,11 @@ else:
     df_padron = cargar_padron_matricial(archivo_padron, nombres_servicios_reales) if archivo_padron else None
     
     if df_padron is not None:
-        st.sidebar.success(f"📊 Flota Vinculada: {len(df_padron)} Buses")
+        st.sidebar.success(f"📊 Flota Vinculada: {len(df_padron)} Patentes")
 
-    if st.sidebar.button("🚀 Iniciar Motor de Fiscalización Territorial", use_container_width=True):
+    if st.sidebar.button("🚀 Iniciar Análisis de Cumplimiento Red", key="btn_motor"):
         if not lineas_dict:
-            st.sidebar.error("Cargue cartografía regulada (KMZ) para operar.")
+            st.sidebar.error("Por favor, cargue la cartografía para iniciar el motor.")
         else:
             st.session_state.alerta_focus = None
             st.session_state.alertas = []
@@ -184,7 +216,6 @@ else:
             hora_actual_dt = datetime.now()
             hora_actual_str = hora_actual_dt.strftime("%H:%M:%S")
             buses_calculados = []
-            nuevas_notificaciones = []
             
             es_horario_comercial = 5 <= hora_actual_dt.hour < 22
 
@@ -253,54 +284,53 @@ else:
                         "Latitud": lat_snap, "Longitud": lon_snap, "Segmento_Ruta": trazado_infractor
                     }
 
-                    if estado == "Operación Normal": historial_ok_filtrado.append(datos_evento)
-                    else:
-                        st.session_state.alertas.append(datos_evento)
-                        nuevas_notificaciones.append(datos_evento)
+                    if estado == "Operación Normal": st.session_state.historial_ok.append(datos_evento)
+                    else: st.session_state.alertas.append(datos_evento)
             
             st.session_state.buses_en_vivo = buses_calculados
-            if nuevas_notificaciones: st.toast(f"🚨 Se han consolidado {len(nuevas_notificaciones)} eventos fuera de norma.", icon="🚨")
+            st.toast(f"Análisis finalizado. Historial operativo actualizado.", icon="✅")
 
-    # --- CENTRO DE NOTIFICACIONES LATERAL ---
+    # Alertas Rápidas en la Sidebar
     st.sidebar.markdown("---")
-    st.sidebar.markdown("<h4 style='color: #EF3340; margin-bottom: 5px;'>🔔 Alertas Activas</h4>", unsafe_allow_html=True)
+    st.sidebar.markdown("<h4 style='color: #EF3340;'>🔔 Alertas de Red</h4>", unsafe_allow_html=True)
     if st.session_state.alertas:
         for a in st.session_state.alertas:
-            color_borde = "#ff7f0e" if "Terminal" in a['Infracción'] else "#EF3340"
             with st.sidebar.container(border=True):
-                st.markdown(f"<p style='color:{color_borde}; font-weight:bold; margin-bottom:2px; font-size:0.85rem;'>⚠️ {a['Infracción']}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='color:#EF3340; font-weight:bold; margin-bottom:2px; font-size:0.8rem;'>{a['Infracción']}</p>", unsafe_allow_html=True)
                 st.caption(f"**PPU:** {a['Patente']} | **Línea:** {a['Servicio']}")
-                if st.button("📍 Geolocalizar", key=f"btn_loc_{a['ID Alerta']}", use_container_width=True):
+                if st.button("📍 Enfocar", key=f"focus_{a['ID Alerta']}", use_container_width=True):
                     st.session_state.alerta_focus = a
                     st.rerun()
     else:
-        st.sidebar.info("Flota operando bajo parámetros normales.")
+        st.sidebar.info("Sin anomalías de trazado reportadas.")
 
-    # --- PANEL DE CONTROL CON FILTROS LIMPIOS (MÓDULO DE BÚSQUEDA) ---
-    st.markdown("### 🔍 Módulos de Filtro Avanzado")
-    opciones_lineas = list(lineas_dict.keys()) if lineas_dict else []
-    opciones_infracciones = list(set([a["Infracción"] for a in st.session_state.alertas])) if st.session_state.alertas else ["Todas"]
+    # --- CUADRO DE MANDOS: TARJETAS MÉTRICAS (KPI GRID) ---
+    total_buses = len(st.session_state.buses_en_vivo)
+    buses_fuera_norma = len(st.session_state.alertas)
+    buses_normales = total_buses - buses_fuera_norma
 
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1:
+        st.markdown(f"<div class='kpi-container'><div class='kpi-title'>Total Flota Controlada</div><div class='kpi-value'>{total_buses}</div></div>", unsafe_allow_html=True)
+    with col_m2:
+        st.markdown(f"<div class='kpi-container' style='border-left-color: #2ca02c;'><div class='kpi-title'>Operación Normal</div><div class='kpi-value' style='color:#2ca02c;'>{max(0, buses_normales)}</div></div>", unsafe_allow_html=True)
+    with col_m3:
+        st.markdown(f"<div class='kpi-container' style='border-left-color: #EF3340;'><div class='kpi-title'>Alertas / Anomalías</div><div class='kpi-value' style='color:#EF3340;'>{buses_fuera_norma}</div></div>", unsafe_allow_html=True)
+    with col_m4:
+        servicios_activos = len(nombres_servicios_reales)
+        st.markdown(f"<div class='kpi-container' style='border-left-color: #7f7f7f;'><div class='kpi-title'>Servicios en Sistema</div><div class='kpi-value' style='color:#444444;'>{servicios_activos}</div></div>", unsafe_allow_html=True)
+
+    # --- FILTROS DE BÚSQUEDA ---
+    st.markdown("<h4 style='color:#0033A0; margin-top:15px;'>🔍 Filtros de Fiscalización Territorial</h4>", unsafe_allow_html=True)
     with st.container(border=True):
-        col1, col2 = st.columns(2)
-        with col1: filtro_linea = st.selectbox("📋 Unidad de Negocio / Línea", ["Todas"] + opciones_lineas)
-        opciones_variantes_crudas = set()
-        if lineas_dict:
-            for lbl, datos in lineas_dict.items():
-                if filtro_linea == "Todas" or filtro_linea == lbl:
-                    for seg in datos['rutas']:
-                        if 'variante' in seg: opciones_variantes_crudas.add(seg['variante'].upper())
-        opciones_variantes = sorted(list(opciones_variantes_crudas))
-        with col2: filtro_variante = st.selectbox("🔀 Trazado / Variante Colectiva", ["Todas"] + opciones_variantes)
-        
-        col3, col4, col5 = st.columns(3)
-        with col3: filtro_infraccion = st.selectbox("🚦 Estado de Cumplimiento", ["Todas"] + opciones_infracciones)
-        with col4: filtro_tecnologia = st.selectbox("⚡ Segmentación Energética", ["Todas", "Solo Eléctricos", "Solo Diésel"])
-        with col5: buscar_patente_input = st.text_input("🔎 Filtrar por Patente (P.P.U)", placeholder="ABCD-12")
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1: filtro_linea = st.selectbox("📋 Unidad de Negocio / Servicio", ["Todas"] + opciones_lineas)
+        with col_f2: filtro_infraccion = st.selectbox("🚦 Tipo de Incumplimiento", ["Todas"] + opciones_infracciones)
+        with col_f3: buscar_patente_input = st.text_input("🔎 Placa Patente Única (P.P.U)", placeholder="ej: BBBB-11")
 
     buscar_patente = buscar_patente_input.strip().upper()
 
-    # Filtros de datos en memoria
+    # Filtrado de Colecciones
     buses_filtrados = st.session_state.buses_en_vivo
     alertas_filtradas = st.session_state.alertas
     historial_ok_filtrado = st.session_state.historial_ok
@@ -318,24 +348,19 @@ else:
         alertas_filtradas = [a for a in alertas_filtradas if buscar_patente in a["Patente"].upper()]
         historial_ok_filtrado = [h for h in historial_ok_filtrado if buscar_patente in h["Patente"].upper()]
 
-    # --- PESTAÑAS INSTITUCIONALES ---
-    tab1, tab2 = st.tabs(["🛰️ Cartografía y Posicionamiento GPS", "🔥 Análisis de Desvíos e Historial Normativo"])
+    # --- TABS / PESTAÑAS PRINCIPALES ---
+    tab1, tab2 = st.tabs(["🛰️ Monitoreo Satelital en Tiempo Real", "🔥 Historial Estadístico e Infracciones"])
 
     with tab1:
         mapa_vivo = folium.Map(location=[-34.1708, -70.7444], zoom_start=13)
-        folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite Regulador').add_to(mapa_vivo)
+        folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite Gubernamental').add_to(mapa_vivo)
 
-        colores_lineas = ["#0033A0", "#EF3340", "#469990", "#F58231", "#911EB4", "#00FFFF", "#F032E6"] 
+        colores_lineas = ["#0033A0", "#EF3340", "#2ca02c", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"] 
 
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
             if filtro_linea == "Todas" or filtro_linea == lbl:
                 for segmento_obj in datos['rutas']:
-                    var_name = segmento_obj.get('variante', '').upper()
-                    if filtro_variante != "Todas" and filtro_variante != var_name: continue
-                    folium.PolyLine(
-                        segmento_obj['trazado'], color=colores_lineas[idx % len(colores_lineas)], 
-                        weight=4, opacity=0.8, tooltip=f"Línea: {lbl}"
-                    ).add_to(mapa_vivo)
+                    folium.PolyLine(segmento_obj['trazado'], color=colores_lineas[idx % len(colores_lineas)], weight=4, opacity=0.85).add_to(mapa_vivo)
 
         for bus in buses_filtrados:
             es_electrico = bus.get('electrico', False)
@@ -343,33 +368,26 @@ else:
             icon_tipo = "bolt" if es_electrico else "bus"
             tec_text = "⚡ Eléctrico" if es_electrico else "⚙️ Diésel"
             
-            html_pop = f"<div style='font-family: Roboto, sans-serif; font-size: 12px; width: 180px;'><b>PPU:</b> {bus['id']}<br><b>Servicio:</b> {bus['linea']}<br><b>Tecnología:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
+            html_pop = f"<div style='font-family: Roboto, sans-serif; font-size:12px; width:180px;'><b>PPU:</b> {bus['id']}<br><b>Línea:</b> {bus['linea']}<br><b>Motor:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
         st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
     with tab2:
-        st.markdown("#### 🗺️ Reporte Territorial de Modificaciones de Trazado")
+        st.markdown("#### 🗺️ Cartografía de Incidentes y Cobertura Territorial")
         
         centro_mapa = [-34.1708, -70.7444]
         zoom_mapa = 13
         if st.session_state.alerta_focus is not None:
             centro_mapa = [st.session_state.alerta_focus["Latitud"], st.session_state.alerta_focus["Longitud"]]
             zoom_mapa = 16 
-            st.info(f"📍 Foco cartográfico establecido en: **{st.session_state.alerta_focus['Infracción']}** — Patente **{st.session_state.alerta_focus['Patente']}**")
+            st.info(f"📍 Marcador posicionado en infracción: **{st.session_state.alerta_focus['Infracción']}** de la unidad **{st.session_state.alerta_focus['Patente']}**")
         
         mapa_calor = folium.Map(location=centro_mapa, zoom_start=zoom_mapa, tiles=None)
-        folium.TileLayer('CartoDB dark_matter', name='Modo Nocturno / Operativo', control=True).add_to(mapa_calor)
-        folium.TileLayer('OpenStreetMap', name='Modo Técnico / Vial', control=True).add_to(mapa_calor)
+        folium.TileLayer('CartoDB dark_matter', name='Capa Operativa Nocturna', control=True).add_to(mapa_calor)
+        folium.TileLayer('OpenStreetMap', name='Capa Vial Estándar', control=True).add_to(mapa_calor)
         
-        for idx, (lbl, datos) in enumerate(lineas_dict.items()):
-            if filtro_linea == "Todas" or filtro_linea == lbl:
-                for segmento_obj in datos['rutas']:
-                    var_name = segmento_obj.get('variante', '').upper()
-                    if filtro_variante != "Todas" and filtro_variante != var_name: continue
-                    folium.PolyLine(segmento_obj['trazado'], color="#aaaaaa", weight=1.5, opacity=0.5).add_to(mapa_calor)
-
         eventos_completos = historial_ok_filtrado + alertas_filtradas
 
         for evt in eventos_completos:
@@ -383,62 +401,39 @@ else:
                 icono_marker = "info-sign" if "Terminal" in evt["Infracción"] else "exclamation-triangle"
 
                 html_popup = f"""
-                <div style='font-family: Arial, sans-serif; font-size: 13px; width: 240px;'>
-                    <b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br>
-                    <b>Servicio Asociado:</b> {evt['Servicio']}<br>
-                    <b>Variante:</b> {evt['Variante']}<br>
-                    <b>Eje Vial Afectado:</b> <span style='color: #0033A0; font-weight: bold;'>{evt['Tramo Afectado']}</span><br>
-                    <b>Sector:</b> {evt['Sector Comuna']}<br>
+                <div style='font-family: Arial, sans-serif; font-size:13px; width:240px;'>
+                    <b style='color: {color_linea};'>{evt['Infracción']}</b><br><br>
+                    <b>Servicio:</b> {evt['Servicio']}<br>
+                    <b>Tramo Vial:</b> <span style='color: #0033A0; font-weight: bold;'>{evt['Tramo Afectado']}</span><br>
+                    <b>Sector Comuna:</b> {evt['Sector Comuna']}<br>
                     <b>Hora Registro:</b> {evt['Hora Control']}<br>
-                    <hr style='margin: 6px 0; border-color: #ccc;'>
-                    <b>PPU Involucrada:</b> {evt['Patente']}
+                    <hr style='margin: 5px 0; border-color: #ccc;'>
+                    <b>Patente:</b> {evt['Patente']}
                 </div>
                 """
-                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.85).add_to(mapa_calor)
+                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.85).add_to(mapor_calor if 'mapor_calor' in locals() else mapa_calor)
                 folium.Marker(location=[evt["Latitud"], evt["Longitud"]], icon=folium.Icon(color="red" if color_linea=="#EF3340" else "orange", icon=icono_marker, prefix='fa'), popup=folium.Popup(html_popup, max_width=280)).add_to(mapa_calor)
             
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
         st_folium(mapa_calor, width="100%", height=450, returned_objects=[], key="mapa_calor_unico")
         
         st.markdown("---")
-        st.markdown("#### 🚨 Alertas Estratégicas: Puntos Ciegos y Fallas de Cobertura Vial")
-        
         if alertas_filtradas:
             df_alertas_f = pd.DataFrame(alertas_filtradas)
-            df_abandonos = df_alertas_f[df_alertas_f["Infracción"].isin(["Abandono de Trazado", "Acorte/Cambio de Recorrido"])]
-            
-            if not df_abandonos.empty:
-                agrupado = df_abandonos.groupby(["Sector Comuna", "Tramo Afectado"]).agg(
-                    Servicios=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
-                    Ultimo_Registro=('Hora Control', 'max')
-                ).reset_index()
-                
-                for _, row in agrupado.iterrows():
-                    st.error(f"📍 **Informe Operativo Comuna:** El tramo **{row['Tramo Afectado']}** ({row['Sector Comuna']}) registra abandono temporal de la flota de servicios: **{row['Servicios']}** (Último control: {row['Ultimo_Registro']}).")
-            else:
-                st.success("✅ Cobertura de la red en Rancagua operando con frecuencias estables de trazado.")
-            
-            st.markdown("---")
-            st.subheader("Libro Estadístico de Infracciones Operativas")
+            st.subheader("Libro de Registro de Infracciones Operativas")
             st.dataframe(df_alertas_f.drop(columns=['Latitud', 'Longitud', 'Segmento_Ruta'], errors='ignore'), use_container_width=True)
             
-            def generar_excel_multitaba(df_completo, df_ab):
+            # Exportar Reporte en Excel estructurado
+            def generar_excel_multitaba(df_completo):
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as w:
-                    df_completo.drop(columns=['Latitud', 'Longitud', 'Segmento_Ruta'], errors='ignore').to_excel(w, index=False, sheet_name='Fiscalizacion_Detallada')
-                    if not df_ab.empty:
-                        resumen = df_ab.groupby(["Sector Comuna", "Tramo Afectado"]).agg(
-                            Servicios_Ausentes=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
-                            Ultimo_Registro_Control=('Hora Control', 'max'),
-                            Casos_Registrados=('ID Alerta', 'count')
-                        ).reset_index()
-                        resumen.to_excel(w, index=False, sheet_name='Resumen_Ejes_Abandonados')
+                    df_completo.drop(columns=['Latitud', 'Longitud', 'Segmento_Ruta'], errors='ignore').to_excel(w, index=False, sheet_name='Fiscalizacion_SVR')
                 return out.getvalue()
             
             st.download_button(
-                "📥 Exportar Libro S.V.R Regulado (.xlsx)", 
-                data=generar_excel_multitaba(df_alertas_f, df_abandonos), 
+                "📥 Exportar Reporte Institucional S.V.R (.xlsx)", 
+                data=generar_excel_multitaba(df_alertas_f), 
                 file_name="Reporte_Oficial_SVR_ValidacionEnRed.xlsx"
             )
         else:
-            st.info("Inicie el motor de análisis en vivo para consolidar el reporte territorial.")
+            st.info("No se registran datos estadísticos. Ejecute el Motor en la barra lateral.")
