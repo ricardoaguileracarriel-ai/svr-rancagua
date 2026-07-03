@@ -324,8 +324,9 @@ else:
             html_pop = f"<div style='font-size: 12px; width: 200px;'><b>Patente:</b> {bus['id']}<br><b>Servicio:</b> {bus['linea']}<br><b>Tecnología:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
-        folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
-        st_folium(mapa_vivo, width="100%", height=550, returned_objects=[])
+folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
+        # CAMBIA ESTA LÍNEA:
+        st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
     with tab2:
         st.markdown("#### 🗺️ Análisis de Operación y Trazados Inteligentes")
@@ -389,8 +390,9 @@ else:
                     popup=folium.Popup(html_popup, max_width=280)
                 ).add_to(mapa_calor)
             
-        folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
-        st_folium(mapa_calor, width="100%", height=450, returned_objects=[])
+folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
+        # CAMBIA ESTA LÍNEA:
+        st_folium(mapa_calor, width="100%", height=450, returned_objects=[], key="mapa_calor_unico")
         
         st.markdown("---")
         st.markdown("#### 🚨 Alertas Estratégicas: Puntos Ciegos y Fallas de Cobertura Vial")
