@@ -20,7 +20,7 @@ from modulos.motor_gps import (
 st.set_page_config(layout="wide", page_title="Sistema de Validación en Red (S.V.R)", page_icon="🖥️")
 
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'role' not in st.session_state: st.session_state.role = None  # Puede ser 'admin' o 'visor'
+if 'role' not in st.session_state: st.session_state.role = None
 if 'alertas' not in st.session_state: st.session_state.alertas = []
 if 'buses_en_vivo' not in st.session_state: st.session_state.buses_en_vivo = []
 if 'historial_ok' not in st.session_state: st.session_state.historial_ok = []
@@ -64,17 +64,14 @@ else:
     # --- CONTROL DE ACCESO POR ROLES (RBAC) ---
     archivos_kmz_procesar = []
     archivo_padron = None
-    archivo_gtfs = None  # Variable para el GTFS
+    archivo_gtfs = None 
 
     if st.session_state.role == "admin":
         st.sidebar.info("👑 Modo Administrador: Carga manual habilitada.")
         archivos_kmz_crudos = st.sidebar.file_uploader("1. Archivos KMZ Oficiales", type=["kmz"], accept_multiple_files=True)
         if archivos_kmz_crudos:
             archivos_kmz_procesar = [(f.name, f) for f in sorted(archivos_kmz_crudos, key=lambda f: f.name)]
-        
-        # Corrección: Agregado el botón para GTFS
         archivo_gtfs = st.sidebar.file_uploader("2. GTFS Regulado (.zip)", type=["zip"])
-        
         archivo_padron = st.sidebar.file_uploader("3. Padrón de Patentes (.xlsx)", type=["xlsx"])
         
     elif st.session_state.role == "visor":
@@ -82,8 +79,6 @@ else:
         carpeta_datos = "datos"
         if os.path.exists(carpeta_datos):
             archivos_locales = os.listdir(carpeta_datos)
-            
-            # Corrección: .lower() asegura que lea tanto .kmz como .KMZ
             kmz_locales = sorted([f for f in archivos_locales if f.lower().endswith('.kmz')])
             padron_local = [f for f in archivos_locales if f.lower().endswith('.xlsx') or f.lower().endswith('.xls')]
             
@@ -92,7 +87,6 @@ else:
             if not padron_local:
                 st.sidebar.warning("⚠️ No se detectó un archivo Excel en la carpeta 'datos'.")
                 
-            # Preparamos las rutas para que el procesador las lea directamente
             archivos_kmz_procesar = [(nombre, os.path.join(carpeta_datos, nombre)) for nombre in kmz_locales]
             if padron_local:
                 archivo_padron = os.path.join(carpeta_datos, padron_local[0])
@@ -324,8 +318,8 @@ else:
             html_pop = f"<div style='font-size: 12px; width: 200px;'><b>Patente:</b> {bus['id']}<br><b>Servicio:</b> {bus['linea']}<br><b>Tecnología:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
-folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
-        # CAMBIA ESTA LÍNEA:
+        folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
+        # MAPA 1 CON KEY ÚNICA
         st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
     with tab2:
@@ -390,8 +384,8 @@ folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
                     popup=folium.Popup(html_popup, max_width=280)
                 ).add_to(mapa_calor)
             
-folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
-        # CAMBIA ESTA LÍNEA:
+        folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
+        # MAPA 2 CON KEY ÚNICA
         st_folium(mapa_calor, width="100%", height=450, returned_objects=[], key="mapa_calor_unico")
         
         st.markdown("---")
