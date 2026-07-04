@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import folium
+from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 import random
 from datetime import datetime
@@ -29,7 +30,14 @@ def pantalla_login():
             background-size: cover; background-position: center; 
         }
         [data-testid="stHeader"] { background-color: transparent; }
-        [data-testid="stForm"] { background-color: rgba(255, 255, 255, 0.95) !important; padding: 2rem !important; border-radius: 8px !important; }
+        [data-testid="stForm"] {
+            background-color: rgba(13, 22, 41, 0.35) !important;
+            backdrop-filter: blur(6px);
+            border: 1px solid rgba(255,255,255,0.25) !important;
+            padding: 2rem !important; border-radius: 8px !important;
+        }
+        [data-testid="stForm"] label { color: #FFFFFF !important; }
+        [data-testid="stForm"] input { color: #FFFFFF !important; }
         div.stButton > button { background-color: #006FB3 !important; border: none !important; color: white !important; font-weight: bold !important; }
         </style>
     """, unsafe_allow_html=True)
@@ -39,7 +47,7 @@ def pantalla_login():
     with col2:
         st.markdown("<h1 style='text-align: center; color: white; text-shadow: 2px 2px 5px #000; margin-bottom: 20px;'>Sistema de Validación en Red (S.V.R.)</h1>", unsafe_allow_html=True)
         with st.form("Formulario"):
-            st.markdown("<p style='text-align: center; font-weight: bold; font-size:1.1rem;'>INICIAR SESIÓN SEGURA</p>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; font-weight: bold; font-size:1.1rem; color: white;'>INICIAR SESIÓN SEGURA</p>", unsafe_allow_html=True)
             usuario = st.text_input("Usuario Institucional")
             contrasena = st.text_input("Contraseña de Seguridad", type="password")
             st.markdown("<br>", unsafe_allow_html=True)
@@ -67,35 +75,101 @@ else:
         /* 2. ESTILIZACIÓN COMPLETA DEL PANEL LATERAL (SIDEBAR) */
         [data-testid="stSidebar"] { background-color: #0D1629 !important; border-right: 1px solid #1C2B4B !important;}
         [data-testid="stSidebar"] * { color: #FFFFFF !important; }
+        [data-testid="stSidebar"] [data-testid*="stBaseButton"] { background-color: #006FB3 !important; color: white !important; }
 
-        /* Uploader: dropzone, archivo subiendo y archivo subido (testids v1.58) */
-        [data-testid^="stFileUploader"] { background-color: #162448 !important; }
-        [data-testid^="stFileUploader"] * { color: #FFFFFF !important; }
-        [data-testid="stFileUploaderFile"] { border: 1px solid #2a3c6e !important; border-radius: 6px !important; }
-        [data-testid="stFileUploaderFileName"] { color: #D0D8F0 !important; }
-        [data-testid="stFileUploaderDeleteBtn"] svg { fill: #FF6B6B !important; }
-        [data-testid="stFileUploaderDropzone"] { border: 1px dashed #4a5c8e !important; }
-        [data-testid="stFileUploaderDropzone"] button { background-color: #006FB3 !important; }
+        /* Uploaders identificados por su key=".." -> clase .st-key-<key> (estable entre versiones) */
+        .st-key-uploader_kmz [data-testid="stFileUploaderDropzone"],
+        .st-key-uploader_gtfs [data-testid="stFileUploaderDropzone"],
+        .st-key-uploader_padron [data-testid="stFileUploaderDropzone"] {
+            background-color: #162448 !important; border: 1px dashed #4a5c8e !important;
+        }
+        .st-key-uploader_kmz [data-testid="stFileUploaderDropzone"] svg,
+        .st-key-uploader_gtfs [data-testid="stFileUploaderDropzone"] svg,
+        .st-key-uploader_padron [data-testid="stFileUploaderDropzone"] svg { fill: #A0B0D0 !important; }
+
+        /* Corrección del "Blanco sobre Blanco" en la lista de archivos subidos.
+           La clase .st-key-uploader_kmz eleva la especificidad lo suficiente para
+           ganarle al estilo interno de Streamlit (antes perdíamos esa pelea). */
+        /* Cubro ambos nombres de testid: "FileUploaderFile" (fila mientras sube)
+           y "UploadedFile" (fila ya finalizada) — en algunas versiones/momentos
+           el DOM final usa el nombre viejo, y por eso quedaba blanco sobre blanco. */
+        .st-key-uploader_kmz [data-testid*="FileUploaderFile"],
+        .st-key-uploader_gtfs [data-testid*="FileUploaderFile"],
+        .st-key-uploader_padron [data-testid*="FileUploaderFile"],
+        .st-key-uploader_kmz [data-testid*="UploadedFile"],
+        .st-key-uploader_gtfs [data-testid*="UploadedFile"],
+        .st-key-uploader_padron [data-testid*="UploadedFile"] {
+            background-color: transparent !important; border: 1px solid #2a3c6e !important; border-radius: 6px !important;
+        }
+        .st-key-uploader_kmz [data-testid*="FileUploaderFile"] *,
+        .st-key-uploader_gtfs [data-testid*="FileUploaderFile"] *,
+        .st-key-uploader_padron [data-testid*="FileUploaderFile"] *,
+        .st-key-uploader_kmz [data-testid*="UploadedFile"] *,
+        .st-key-uploader_gtfs [data-testid*="UploadedFile"] *,
+        .st-key-uploader_padron [data-testid*="UploadedFile"] * { color: #FFFFFF !important; }
+
+        /* Los "hijos" internos (div/span/small) traen su propio fondo blanco que tapaba
+           el navy del contenedor. Los forzamos a transparente. Los <button> (el "X" azul
+           de eliminar) quedan afuera de esta regla a propósito, para no perder su botón. */
+        .st-key-uploader_kmz [data-testid*="FileUploaderFile"] div,
+        .st-key-uploader_gtfs [data-testid*="FileUploaderFile"] div,
+        .st-key-uploader_padron [data-testid*="FileUploaderFile"] div,
+        .st-key-uploader_kmz [data-testid*="FileUploaderFile"] span,
+        .st-key-uploader_gtfs [data-testid*="FileUploaderFile"] span,
+        .st-key-uploader_padron [data-testid*="FileUploaderFile"] span,
+        .st-key-uploader_kmz [data-testid*="FileUploaderFile"] small,
+        .st-key-uploader_gtfs [data-testid*="FileUploaderFile"] small,
+        .st-key-uploader_padron [data-testid*="FileUploaderFile"] small,
+        .st-key-uploader_kmz [data-testid*="UploadedFile"] div,
+        .st-key-uploader_gtfs [data-testid*="UploadedFile"] div,
+        .st-key-uploader_padron [data-testid*="UploadedFile"] div,
+        .st-key-uploader_kmz [data-testid*="UploadedFile"] span,
+        .st-key-uploader_gtfs [data-testid*="UploadedFile"] span,
+        .st-key-uploader_padron [data-testid*="UploadedFile"] span,
+        .st-key-uploader_kmz [data-testid*="UploadedFile"] small,
+        .st-key-uploader_gtfs [data-testid*="UploadedFile"] small,
+        .st-key-uploader_padron [data-testid*="UploadedFile"] small {
+            background-color: transparent !important;
+        }
+        .st-key-uploader_kmz [data-testid*="FileUploaderDeleteBtn"] svg,
+        .st-key-uploader_gtfs [data-testid*="FileUploaderDeleteBtn"] svg,
+        .st-key-uploader_padron [data-testid*="FileUploaderDeleteBtn"] svg { fill: #FF6B6B !important; }
+
+        /* Refuerzo puntual con la clase detectada en devtools. OJO: st-emotion-cache-XXX
+           es un hash que Streamlit regenera en cada build/deploy, puede cambiar. */
+        .st-emotion-cache-1ne20ew { background-color: #0D1629 !important; color: #FFFFFF !important; }
 
         /* 3. FORZAR PANEL DE FILTROS A AZUL OSCURO (#0A132D) */
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] { background-color: #0A132D !important; border: 1px solid #1C2B4B !important; border-radius: 8px !important; }
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] label,
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] h4,
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] p { color: #FFFFFF !important; }
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] > div,
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stTextInput"] div[data-baseweb="input"] { background-color: #162448 !important; border: 1px solid #2a3c6e !important; }
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] *,
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] input { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
-        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] svg { fill: #FFFFFF !important; }
+        /* .st-key-panel_filtros viene de: st.container(border=True, key="panel_filtros") */
+        .st-key-panel_filtros,
+        .st-key-panel_filtros > div {
+            background-color: #0A132D !important; border: 1px solid #1C2B4B !important; border-radius: 8px !important;
+        }
+        .st-key-panel_filtros [data-testid="stWidgetLabel"] p,
+        .st-key-panel_filtros label,
+        .st-key-panel_filtros h4,
+        .st-key-panel_filtros p { color: #FFFFFF !important; }
 
-        /* Menú desplegable del selectbox (se pinta fuera del contenedor, en un portal) */
-        ul[data-baseweb="menu"] { background-color: #162448 !important; }
-        ul[data-baseweb="menu"] li { color: #FFFFFF !important; }
-        ul[data-baseweb="menu"] li:hover { background-color: #006FB3 !important; }
+        /* Cajas cerradas de selects e inputs dentro del panel de filtros */
+        .st-key-panel_filtros div[data-baseweb="select"] > div,
+        .st-key-panel_filtros [data-testid="stTextInput"] div[data-baseweb="input"] {
+            background-color: #162448 !important; border: 1px solid #2a3c6e !important;
+        }
+        .st-key-panel_filtros div[data-baseweb="select"] *,
+        .st-key-panel_filtros input {
+            color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important;
+        }
+        .st-key-panel_filtros div[data-baseweb="select"] svg { fill: #FFFFFF !important; }
+
+        /* El menú desplegable del select se inyecta en un portal al final del <body>,
+           FUERA del panel de filtros, por eso va sin anidar bajo .st-key-panel_filtros. */
+        div[data-baseweb="popover"] ul[role="listbox"] { background-color: #162448 !important; }
+        div[data-baseweb="popover"] ul[role="listbox"] li { color: #FFFFFF !important; }
+        div[data-baseweb="popover"] ul[role="listbox"] li:hover { background-color: #006FB3 !important; }
 
         /* 4. CONTROL DE COLORES EN BOTONES DE NOTIFICACIÓN */
-        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(2) button { background-color: #2CA02C !important; } /* OK - Verde */
-        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(3) button { background-color: #EF3340 !important; } /* DEL - Rojo */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(2) [data-testid*="stBaseButton"] { background-color: #2CA02C !important; } /* OK - Verde */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(3) [data-testid*="stBaseButton"] { background-color: #EF3340 !important; } /* DEL - Rojo */
 
         /* 5. DISEÑO TARJETAS KPI */
         .kpi-container { background-color: #0A132D; color: white; border-radius: 8px; padding: 15px 20px; display: flex; align-items: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.15);}
@@ -109,6 +183,81 @@ else:
         </style>
         <div class="banner-inferior">MINISTERIO DE TRANSPORTES Y TELECOMUNICACIONES</div>
     """, unsafe_allow_html=True)
+
+    # --- RED DE SEGURIDAD: FUERZA LOS COLORES POR JS SI EL CSS PIERDE LA ESPECIFICIDAD ---
+    # components.html corre en un iframe aislado, por eso se manipula window.parent.document.
+    # El MutationObserver reaplica los estilos cada vez que Streamlit vuelve a renderizar
+    # (al subir un archivo, cambiar un filtro, etc.), que es justo cuando el CSS estático falla.
+    st.components.v1.html("""
+        <script>
+        function forzarEstilosSVR() {
+            const doc = window.parent.document;
+
+            doc.querySelectorAll('[data-testid*="FileUploaderFile"], [data-testid*="UploadedFile"]').forEach(el => {
+                el.style.setProperty('background-color', 'transparent', 'important');
+                el.style.setProperty('border', '1px solid #2a3c6e', 'important');
+                el.style.setProperty('border-radius', '6px', 'important');
+            });
+            doc.querySelectorAll('[data-testid*="FileUploaderFile"] *, [data-testid*="UploadedFile"] *').forEach(el => {
+                el.style.setProperty('color', '#FFFFFF', 'important');
+                if (el.tagName !== 'BUTTON' && el.tagName !== 'SVG' && el.tagName !== 'PATH') {
+                    el.style.setProperty('background-color', 'transparent', 'important');
+                }
+            });
+
+            doc.querySelectorAll('div[data-baseweb="select"] > div').forEach(el => {
+                el.style.setProperty('background-color', '#162448', 'important');
+                el.style.setProperty('border', '1px solid #2a3c6e', 'important');
+            });
+            doc.querySelectorAll('div[data-baseweb="select"] *').forEach(el => {
+                el.style.setProperty('color', '#FFFFFF', 'important');
+            });
+
+            doc.querySelectorAll('div[data-baseweb="popover"] ul[role="listbox"]').forEach(el => {
+                el.style.setProperty('background-color', '#162448', 'important');
+            });
+            doc.querySelectorAll('div[data-baseweb="popover"] ul[role="listbox"] li').forEach(el => {
+                el.style.setProperty('color', '#FFFFFF', 'important');
+            });
+
+            // Fondo del panel de filtros (container con key="panel_filtros")
+            doc.querySelectorAll('.st-key-panel_filtros').forEach(el => {
+                el.style.setProperty('background-color', '#0A132D', 'important');
+                el.style.setProperty('border', '1px solid #1C2B4B', 'important');
+                el.style.setProperty('border-radius', '8px', 'important');
+                const hijo = el.querySelector(':scope > div');
+                if (hijo) hijo.style.setProperty('background-color', '#0A132D', 'important');
+            });
+            doc.querySelectorAll('.st-key-panel_filtros label, .st-key-panel_filtros p, .st-key-panel_filtros h4').forEach(el => {
+                el.style.setProperty('color', '#FFFFFF', 'important');
+            });
+        }
+
+        // Streamlit a veces NO agrega/quita nodos al terminar una subida: solo cambia
+        // el "style" o "class" del MISMO nodo (por eso antes se volvía a ver blanco:
+        // el observer solo escuchaba childList y nunca se volvía a disparar).
+        // Aquí se observan también atributos, con una bandera para no entrar en un
+        // bucle infinito (nosotros mismos modificamos "style" al forzar los colores).
+        let aplicando = false;
+        const observer = new MutationObserver(() => {
+            if (aplicando) return;
+            aplicando = true;
+            forzarEstilosSVR();
+            // Se libera en el siguiente frame, una vez que el navegador ya aplicó
+            // los estilos que acabamos de setear.
+            requestAnimationFrame(() => { aplicando = false; });
+        });
+        observer.observe(window.parent.document.body, {
+            childList: true, subtree: true,
+            attributes: true, attributeFilter: ['style', 'class']
+        });
+        forzarEstilosSVR();
+
+        // Red de seguridad adicional: reintento periódico por si algún cambio
+        // se escapa del observer (p.ej. animaciones o timers internos de React).
+        setInterval(forzarEstilosSVR, 800);
+        </script>
+    """, height=0)
 
     col_tit, col_log = st.columns([9, 1.2])
     with col_tit:
@@ -124,11 +273,11 @@ else:
 
     if st.session_state.role == "admin":
         st.sidebar.info("👑 Modo Administrador: Carga manual habilitada.")
-        archivos_kmz_crudos = st.sidebar.file_uploader("1. Archivos KMZ Oficiales", type=["kmz"], accept_multiple_files=True)
+        archivos_kmz_crudos = st.sidebar.file_uploader("1. Archivos KMZ Oficiales", type=["kmz"], accept_multiple_files=True, key="uploader_kmz")
         if archivos_kmz_crudos:
             archivos_kmz_procesar = [(f.name, f) for f in sorted(archivos_kmz_crudos, key=lambda f: f.name)]
-        archivo_gtfs = st.sidebar.file_uploader("2. GTFS Regulado (.zip)", type=["zip"])
-        archivo_padron = st.sidebar.file_uploader("3. Padrón de Patentes (.xlsx)", type=["xlsx"])
+        archivo_gtfs = st.sidebar.file_uploader("2. GTFS Regulado (.zip)", type=["zip"], key="uploader_gtfs")
+        archivo_padron = st.sidebar.file_uploader("3. Padrón de Patentes (.xlsx)", type=["xlsx"], key="uploader_padron")
         
     elif st.session_state.role == "visor":
         st.sidebar.info("👁️ Modo Visor: Lectura automática desde la base de datos central.")
@@ -259,7 +408,7 @@ else:
     opciones_lineas = list(lineas_dict.keys()) if lineas_dict else []
     opciones_infracciones = list(set([a["Infracción"] for a in st.session_state.alertas])) if st.session_state.alertas else ["Todas"]
 
-    with st.container(border=True):
+    with st.container(border=True, key="panel_filtros"):
         st.markdown("<h4 style='margin-top: 0; margin-bottom: 10px; color: white;'>🔍 Filtros de Operación</h4>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1: filtro_linea = st.selectbox("📋 Línea", ["Todas"] + opciones_lineas)
@@ -318,6 +467,7 @@ else:
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
+        Fullscreen(position='topleft').add_to(mapa_vivo)
         st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
     with tab2:
@@ -355,6 +505,7 @@ else:
                 folium.Marker(location=[evt["Latitud"], evt["Longitud"]], icon=folium.Icon(color="red" if color_linea=="#d62728" else "orange", icon=icono_marker, prefix='fa'), popup=folium.Popup(html_popup, max_width=280)).add_to(mapa_calor)
             
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
+        Fullscreen(position='topleft').add_to(mapa_calor)
         st_folium(mapa_calor, width="100%", height=450, returned_objects=[], key="mapa_calor_unico")
         
         st.markdown("---")
