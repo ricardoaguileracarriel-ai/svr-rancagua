@@ -27,13 +27,44 @@ if 'historial_ok' not in st.session_state: st.session_state.historial_ok = []
 if 'alerta_focus' not in st.session_state: st.session_state.alerta_focus = None
 
 def pantalla_login():
-    st.markdown("<div style='text-align: center; margin-top: 50px;'><h2>🔒 Sistema de Validación en Red (S.V.R)</h2><p style='color: gray;'>Perímetro de Exclusión y Regulación Operativa</p></div>", unsafe_allow_html=True)
+    # CSS EXCLUSIVO PARA EL LOGIN (FONDO DE IMAGEN)
+    st.markdown("""
+        <style>
+        [data-testid="stAppViewContainer"] {
+            /* REEMPLAZA LA URL DE ABAJO POR TU ENLACE RAW DE GITHUB */
+            background-image: url('https://github.com/ricardoaguileracarriel-ai/svr-rancagua/blob/cf5c24d4ef44549ef679e8ee31ab419731fb76c5/fondo_bus.png?raw=true');
+            background-size: cover;
+            background-position: center;
+        }
+        [data-testid="stHeader"] {
+            background-color: transparent;
+        }
+        /* Fondo blanco semi-transparente para que el formulario se lea bien */
+        [data-testid="stForm"] {
+            background-color: rgba(255, 255, 255, 0.92) !important;
+            padding: 2rem !important;
+            border-radius: 10px !important;
+            box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.3) !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        # BANNER DEL TÍTULO EN EL LOGIN
+        st.markdown("""
+            <div style='background-color: #0033A0; padding: 20px; text-align: center; color: white; border-bottom: 5px solid #EF3340; border-radius: 8px 8px 0 0; box-shadow: 0px 4px 10px rgba(0,0,0,0.3);'>
+                <h2 style='margin: 0; color: white; font-weight: bold;'>SISTEMA DE VALIDACIÓN EN RED (S.V.R.)</h2>
+                <p style='margin: 5px 0 0 0; font-size: 1rem; opacity: 0.9;'>Ministerio de Transportes y Telecomunicaciones</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
         with st.form("Formulario"):
+            st.markdown("<p style='text-align: center; font-weight: bold; color: #333;'>INICIAR SESIÓN SEGURA</p>", unsafe_allow_html=True)
             usuario = st.text_input("Usuario Institucional")
             contrasena = st.text_input("Contraseña de Seguridad", type="password")
-            if st.form_submit_button("Ingresar a la Plataforma"):
+            if st.form_submit_button("Ingresar a la Plataforma", use_container_width=True):
                 if usuario == "admin" and contrasena == "rancagua2026":
                     st.session_state.logged_in = True
                     st.session_state.role = "admin"
@@ -49,11 +80,46 @@ def pantalla_login():
 if not st.session_state.logged_in:
     pantalla_login()
 else:
-    col_tit, col_log = st.columns([9, 1])
-    with col_tit:
-        st.markdown("<h1 style='white-space: nowrap; font-size: 2.3rem;'>🖥️ Sistema de Validación en Red (S.V.R)</h1>", unsafe_allow_html=True)
+    # CSS PARA LIMPIAR EL FONDO Y AGREGAR EL BANNER INFERIOR
+    st.markdown("""
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background-image: none !important; /* Quita la imagen al entrar */
+            background-color: transparent !important; /* Respeta tu modo claro/oscuro */
+        }
+        /* BANNER INFERIOR FIJO */
+        .banner-inferior {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #0033A0;
+            color: white;
+            text-align: center;
+            padding: 10px 0;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            border-top: 4px solid #EF3340;
+            z-index: 999999;
+        }
+        /* Da un espacio abajo para que el banner no tape el contenido */
+        .block-container {
+            padding-bottom: 70px !important;
+        }
+        </style>
+        <div class="banner-inferior">MINISTERIO DE TRANSPORTES Y TELECOMUNICACIONES</div>
+    """, unsafe_allow_html=True)
+
+    # BANNER SUPERIOR CON LA PROPORCIÓN CORRECTA
+    st.markdown("""
+        <div style="background-color: #0033A0; padding: 12px 20px; border-bottom: 4px solid #EF3340; color: white; display: flex; align-items: center; justify-content: space-between; border-radius: 5px; margin-bottom: 20px;">
+            <h2 style="margin: 0; color: white; font-size: 1.6rem; font-weight: bold;">SISTEMA DE VALIDACIÓN EN RED (S.V.R)</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
+    col_vacia, col_log = st.columns([9, 1])
     with col_log:
-        st.write("")
         if st.button("🔒 Cerrar Sesión", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.role = None
@@ -319,7 +385,6 @@ else:
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
-        # MAPA 1 CON KEY ÚNICA
         st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
     with tab2:
