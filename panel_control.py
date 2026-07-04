@@ -10,127 +10,117 @@ import os
 # --- IMPORTACIÓN DE NUESTROS MÓDULOS SEPARADOS ---
 from modulos.ingesta_datos import extraer_coordenadas_kmz, cargar_padron_matricial
 from modulos.motor_gps import (
-    snap_punto_a_ruta, 
-    evaluar_operacion, 
-    determinar_sector, 
-    generar_tramo_realista_por_sector
+    snap_punto_a_ruta, evaluar_operacion, determinar_sector, generar_tramo_realista_por_sector
 )
 
-# 1. Configuración e Inicialización
+# 1. Configuración de la plataforma
 st.set_page_config(layout="wide", page_title="Sistema de Validación en Red (S.V.R)", page_icon="🖥️")
 
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'role' not in st.session_state: st.session_state.role = None
-if 'alertas' not in st.session_state: st.session_state.alertas = []
-if 'buses_en_vivo' not in st.session_state: st.session_state.buses_en_vivo = []
-if 'historial_ok' not in st.session_state: st.session_state.historial_ok = []
-if 'alerta_focus' not in st.session_state: st.session_state.alerta_focus = None
+# Inicialización segura de variables de estado
+for key in ['logged_in', 'role', 'alertas', 'buses_en_vivo', 'historial_ok', 'alerta_focus']:
+    if key not in st.session_state:
+        st.session_state[key] = False if key == 'logged_in' else None if key in ['role', 'alerta_focus'] else []
 
 def pantalla_login():
-    # CSS EXCLUSIVO PARA EL LOGIN (FONDO DE IMAGEN)
     st.markdown("""
         <style>
-        [data-testid="stAppViewContainer"] {
-            /* REEMPLAZA LA URL DE ABAJO POR TU ENLACE RAW DE GITHUB */
-            background-image: url('https://github.com/ricardoaguileracarriel-ai/svr-rancagua/blob/cf5c24d4ef44549ef679e8ee31ab419731fb76c5/fondo_bus.png?raw=true');
-            background-size: cover;
-            background-position: center;
+        [data-testid="stAppViewContainer"] { 
+            background-image: url('https://github.com/ricardoaguileracarriel-ai/svr-rancagua/blob/cf5c24d4ef44549ef679e8ee31ab419731fb76c5/fondo_bus.png?raw=true'); 
+            background-size: cover; background-position: center; 
         }
-        [data-testid="stHeader"] {
-            background-color: transparent;
-        }
-        /* Fondo blanco semi-transparente para que el formulario se lea bien */
-        [data-testid="stForm"] {
-            background-color: rgba(255, 255, 255, 0.92) !important;
-            padding: 2rem !important;
-            border-radius: 10px !important;
-            box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.3) !important;
-        }
+        [data-testid="stHeader"] { background-color: transparent; }
+        [data-testid="stForm"] { background-color: rgba(255, 255, 255, 0.95) !important; padding: 2rem !important; border-radius: 8px !important; }
+        div.stButton > button { background-color: #006FB3 !important; border: none !important; color: white !important; font-weight: bold !important; }
         </style>
     """, unsafe_allow_html=True)
     
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 2, 1])
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1.5, 1.8, 1.5])
     with col2:
-        # BANNER DEL TÍTULO EN EL LOGIN
-        st.markdown("""
-            <div style='background-color: #0033A0; padding: 20px; text-align: center; color: white; border-bottom: 5px solid #EF3340; border-radius: 8px 8px 0 0; box-shadow: 0px 4px 10px rgba(0,0,0,0.3);'>
-                <h2 style='margin: 0; color: white; font-weight: bold;'>SISTEMA DE VALIDACIÓN EN RED (S.V.R.)</h2>
-                <p style='margin: 5px 0 0 0; font-size: 1rem; opacity: 0.9;'>Ministerio de Transportes y Telecomunicaciones</p>
-            </div>
-        """, unsafe_allow_html=True)
-        
+        st.markdown("<h1 style='text-align: center; color: white; text-shadow: 2px 2px 5px #000; margin-bottom: 20px;'>Sistema de Validación en Red (S.V.R.)</h1>", unsafe_allow_html=True)
         with st.form("Formulario"):
-            st.markdown("<p style='text-align: center; font-weight: bold; color: #333;'>INICIAR SESIÓN SEGURA</p>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; font-weight: bold; font-size:1.1rem;'>INICIAR SESIÓN SEGURA</p>", unsafe_allow_html=True)
             usuario = st.text_input("Usuario Institucional")
             contrasena = st.text_input("Contraseña de Seguridad", type="password")
+            st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Ingresar a la Plataforma", use_container_width=True):
                 if usuario == "admin" and contrasena == "rancagua2026":
-                    st.session_state.logged_in = True
-                    st.session_state.role = "admin"
-                    st.rerun()
+                    st.session_state.logged_in = True; st.session_state.role = "admin"; st.rerun()
                 elif usuario == "visor" and contrasena == "consulta2026":
-                    st.session_state.logged_in = True
-                    st.session_state.role = "visor"
-                    st.rerun()
+                    st.session_state.logged_in = True; st.session_state.role = "visor"; st.rerun()
                 else:
                     st.error("Credenciales incorrectas.")
 
-# --- INICIO DE INTERFAZ ---
+# --- INTERFAZ DE TRABAJO PRINCIPAL ---
 if not st.session_state.logged_in:
     pantalla_login()
 else:
-    # CSS PARA LIMPIAR EL FONDO Y AGREGAR EL BANNER INFERIOR
+    # INYECCIÓN DE CSS AVANZADO CON UNSAFE_ALLOW_HTML=TRUE
     st.markdown("""
         <style>
-        [data-testid="stAppViewContainer"] {
-            background-image: none !important; /* Quita la imagen al entrar */
-            background-color: transparent !important; /* Respeta tu modo claro/oscuro */
-        }
-        /* BANNER INFERIOR FIJO */
-        .banner-inferior {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: #0033A0;
-            color: white;
-            text-align: center;
-            padding: 10px 0;
-            font-size: 14px;
-            font-weight: bold;
-            letter-spacing: 1px;
-            border-top: 4px solid #EF3340;
-            z-index: 999999;
-        }
-        /* Da un espacio abajo para que el banner no tape el contenido */
-        .block-container {
-            padding-bottom: 70px !important;
-        }
+        [data-testid="stAppViewContainer"] { background-image: none !important; background-color: transparent !important; }
+        
+        /* 1. CONFIGURACIÓN GLOBAL DE BOTONES (#006FB3) */
+        div.stButton > button { background-color: #006FB3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+        div.stButton > button:hover { background-color: #005A91 !important; }
+        
+        /* 2. ESTILIZACIÓN COMPLETA DEL PANEL LATERAL (SIDEBAR) */
+        [data-testid="stSidebar"] { background-color: #0D1629 !important; border-right: 1px solid #1C2B4B !important;}
+        [data-testid="stSidebar"] * { color: #FFFFFF !important; }
+
+        /* Uploader: dropzone, archivo subiendo y archivo subido (testids v1.58) */
+        [data-testid^="stFileUploader"] { background-color: #162448 !important; }
+        [data-testid^="stFileUploader"] * { color: #FFFFFF !important; }
+        [data-testid="stFileUploaderFile"] { border: 1px solid #2a3c6e !important; border-radius: 6px !important; }
+        [data-testid="stFileUploaderFileName"] { color: #D0D8F0 !important; }
+        [data-testid="stFileUploaderDeleteBtn"] svg { fill: #FF6B6B !important; }
+        [data-testid="stFileUploaderDropzone"] { border: 1px dashed #4a5c8e !important; }
+        [data-testid="stFileUploaderDropzone"] button { background-color: #006FB3 !important; }
+
+        /* 3. FORZAR PANEL DE FILTROS A AZUL OSCURO (#0A132D) */
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] { background-color: #0A132D !important; border: 1px solid #1C2B4B !important; border-radius: 8px !important; }
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] label,
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] h4,
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] p { color: #FFFFFF !important; }
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] > div,
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stTextInput"] div[data-baseweb="input"] { background-color: #162448 !important; border: 1px solid #2a3c6e !important; }
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] *,
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] input { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
+        section.main div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="select"] svg { fill: #FFFFFF !important; }
+
+        /* Menú desplegable del selectbox (se pinta fuera del contenedor, en un portal) */
+        ul[data-baseweb="menu"] { background-color: #162448 !important; }
+        ul[data-baseweb="menu"] li { color: #FFFFFF !important; }
+        ul[data-baseweb="menu"] li:hover { background-color: #006FB3 !important; }
+
+        /* 4. CONTROL DE COLORES EN BOTONES DE NOTIFICACIÓN */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(2) button { background-color: #2CA02C !important; } /* OK - Verde */
+        section[data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="column"]:nth-child(3) button { background-color: #EF3340 !important; } /* DEL - Rojo */
+
+        /* 5. DISEÑO TARJETAS KPI */
+        .kpi-container { background-color: #0A132D; color: white; border-radius: 8px; padding: 15px 20px; display: flex; align-items: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.15);}
+        .kpi-icon { font-size: 2.2rem; margin-right: 18px; }
+        .kpi-title { font-size: 0.85rem; color: #A0B0D0; text-transform: uppercase; margin-bottom: 3px; }
+        .kpi-value { font-size: 2rem; font-weight: bold; }
+        
+        /* 6. BANNER INFERIOR FIJO */
+        .banner-inferior { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #0A132D; color: white; text-align: center; padding: 10px 0; font-weight: bold; z-index: 9999; border-top: 3px solid #EF3340; }
+        .block-container { padding-bottom: 70px !important; }
         </style>
         <div class="banner-inferior">MINISTERIO DE TRANSPORTES Y TELECOMUNICACIONES</div>
     """, unsafe_allow_html=True)
 
-    # BANNER SUPERIOR CON LA PROPORCIÓN CORRECTA
-    st.markdown("""
-        <div style="background-color: #0033A0; padding: 12px 20px; border-bottom: 4px solid #EF3340; color: white; display: flex; align-items: center; justify-content: space-between; border-radius: 5px; margin-bottom: 20px;">
-            <h2 style="margin: 0; color: white; font-size: 1.6rem; font-weight: bold;">SISTEMA DE VALIDACIÓN EN RED (S.V.R)</h2>
-        </div>
-    """, unsafe_allow_html=True)
-
-    col_vacia, col_log = st.columns([9, 1])
+    col_tit, col_log = st.columns([9, 1.2])
+    with col_tit:
+        st.markdown("<h1 style='color: #0A132D; margin-top: -15px;'>Sistema de Validación en Red (S.V.R.)</h1>", unsafe_allow_html=True)
     with col_log:
+        st.write("")
         if st.button("🔒 Cerrar Sesión", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.role = None
-            st.rerun()
+            st.session_state.logged_in = False; st.session_state.role = None; st.rerun()
 
     st.sidebar.header("⚙️ Ingesta de Datos Regulados")
-    
-    # --- CONTROL DE ACCESO POR ROLES (RBAC) ---
     archivos_kmz_procesar = []
     archivo_padron = None
-    archivo_gtfs = None 
 
     if st.session_state.role == "admin":
         st.sidebar.info("👑 Modo Administrador: Carga manual habilitada.")
@@ -148,25 +138,20 @@ else:
             kmz_locales = sorted([f for f in archivos_locales if f.lower().endswith('.kmz')])
             padron_local = [f for f in archivos_locales if f.lower().endswith('.xlsx') or f.lower().endswith('.xls')]
             
-            if not kmz_locales:
-                st.sidebar.warning("⚠️ No se detectaron archivos KMZ en la carpeta 'datos'.")
-            if not padron_local:
-                st.sidebar.warning("⚠️ No se detectó un archivo Excel en la carpeta 'datos'.")
+            if not kmz_locales: st.sidebar.warning("⚠️ No se detectaron archivos KMZ en la carpeta 'datos'.")
+            if not padron_local: st.sidebar.warning("⚠️ No se detectó un archivo Excel en la carpeta 'datos'.")
                 
             archivos_kmz_procesar = [(nombre, os.path.join(carpeta_datos, nombre)) for nombre in kmz_locales]
-            if padron_local:
-                archivo_padron = os.path.join(carpeta_datos, padron_local[0])
+            if padron_local: archivo_padron = os.path.join(carpeta_datos, padron_local[0])
         else:
-            st.sidebar.error("❌ La carpeta 'datos' no existe en tu proyecto. Créala y pon los archivos allí.")
+            st.sidebar.error("❌ La carpeta 'datos' no existe en tu proyecto.")
 
-    # --- PROCESAMIENTO DE ARCHIVOS ---
     lineas_dict = {}
     if archivos_kmz_procesar:
         for nombre_archivo, archivo_o_ruta in archivos_kmz_procesar:
             nombre_servicio = nombre_archivo.split(".")[0].upper()
             datos_kmz = extraer_coordenadas_kmz(archivo_o_ruta)
-            if datos_kmz: 
-                lineas_dict[nombre_servicio] = datos_kmz
+            if datos_kmz: lineas_dict[nombre_servicio] = datos_kmz
 
     nombres_servicios_reales = list(lineas_dict.keys())
     df_padron = cargar_padron_matricial(archivo_padron, nombres_servicios_reales) if archivo_padron else None
@@ -174,6 +159,7 @@ else:
     if df_padron is not None:
         total_electricos = df_padron['Es_Electrico'].sum() if 'Es_Electrico' in df_padron.columns else 0
         st.sidebar.success(f"✅ Familias de Líneas: {len(nombres_servicios_reales)}")
+        st.sidebar.success(f"⚡ Flota Eléctrica: {int(total_electricos)}")
         st.sidebar.success(f"✅ Flota Vinculada: {len(df_padron)} patentes listas.")
 
     if st.sidebar.button("🚀 Iniciar Motor de Análisis en Vivo", use_container_width=True):
@@ -190,132 +176,91 @@ else:
             nuevas_notificaciones = []
             
             es_horario_comercial = 5 <= hora_actual_dt.hour < 22
-            
-            if not es_horario_comercial:
-                st.toast("🌙 Sistema operando en horario nocturno. Flota en retorno.", icon="🌙")
+            if not es_horario_comercial: st.toast("🌙 Sistema operando en horario nocturno.", icon="🌙")
 
             if df_padron is not None and not df_padron.empty:
                 flota_muestra = df_padron.sample(min(20, len(df_padron))) if len(df_padron) > 20 else df_padron
-                
                 for _, fila in flota_muestra.iterrows():
                     patente = str(fila['Patente'])
                     linea_asignada = str(fila['Servicio_Oficial'])
                     es_electrico = fila.get('Es_Electrico', False)
                     
-                    if linea_asignada not in lineas_dict:
-                        continue 
-                    
+                    if linea_asignada not in lineas_dict: continue 
                     rutas_obj = lineas_dict[linea_asignada]['rutas']
                     paraderos_obj = lineas_dict[linea_asignada]['paraderos']
-                    
-                    if not rutas_obj:
-                        continue
+                    if not rutas_obj: continue
                         
                     trazado_puntos = [pt for seg in rutas_obj for pt in seg['trazado']]
                     punto_base = random.choice(trazado_puntos)
                     
-                    if not es_horario_comercial:
-                        comportamiento = random.choices(["OK", "TERMINAL"], weights=[50, 50])[0]
-                    else:
-                        comportamiento = random.choices(["OK", "TERMINAL", "ACORTE", "ABANDONO", "VELOCIDAD"], weights=[65, 5, 10, 10, 10])[0]
+                    if not es_horario_comercial: comportamiento = random.choices(["OK", "TERMINAL"], weights=[50, 50])[0]
+                    else: comportamiento = random.choices(["OK", "TERMINAL", "ACORTE", "ABANDONO", "VELOCIDAD"], weights=[65, 5, 10, 10, 10])[0]
                     
                     limite_zona = 50
-                    
-                    if comportamiento == "OK":
-                        lat_actual = punto_base[0] + random.uniform(-0.0001, 0.0001)
-                        lon_actual = punto_base[1] + random.uniform(-0.0001, 0.0001)
-                        vel = random.randint(25, 48)
-                    elif comportamiento == "TERMINAL":
-                        punto_base = trazado_puntos[0] if random.choice([True, False]) else trazado_puntos[-1]
-                        lat_actual = punto_base[0]
-                        lon_actual = punto_base[1]
-                        vel = 0
-                    elif comportamiento == "VELOCIDAD":
-                        lat_actual = punto_base[0]
-                        lon_actual = punto_base[1]
-                        vel = random.randint(55, 75)
-                    elif comportamiento == "ACORTE":
-                        lat_actual = punto_base[0] + random.uniform(-0.0007, 0.001) 
-                        lon_actual = punto_base[1] + random.uniform(-0.0007, 0.001)
-                        vel = random.randint(30, 48)
-                    elif comportamiento == "ABANDONO":
-                        lat_actual = punto_base[0] + random.uniform(-0.002, 0.003) 
-                        lon_actual = punto_base[1] + random.uniform(-0.002, 0.003)
-                        vel = random.randint(30, 48)
+                    if comportamiento == "OK": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0001, 0.0001), punto_base[1] + random.uniform(-0.0001, 0.0001), random.randint(25, 48)
+                    elif comportamiento == "TERMINAL": lat_actual, lon_actual, vel = (trazado_puntos[0][0], trazado_puntos[0][1], 0) if random.choice([True, False]) else (trazado_puntos[-1][0], trazado_puntos[-1][1], 0)
+                    elif comportamiento == "VELOCIDAD": lat_actual, lon_actual, vel = punto_base[0], punto_base[1], random.randint(55, 75)
+                    elif comportamiento == "ACORTE": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0007, 0.001), punto_base[1] + random.uniform(-0.0007, 0.001), random.randint(30, 48)
+                    elif comportamiento == "ABANDONO": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.002, 0.003), punto_base[1] + random.uniform(-0.002, 0.003), random.randint(30, 48)
                         
                     estado, dist_error = evaluar_operacion(lat_actual, lon_actual, rutas_obj, vel, limite_zona, paraderos_obj)
                     lat_snap, lon_snap, variante_exacta, trazado_infractor = snap_punto_a_ruta(lat_actual, lon_actual, rutas_obj)
 
-                    buses_calculados.append({
-                        "id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual,
-                        "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), 
-                        "vel": vel, "limite": limite_zona, "electrico": es_electrico
-                    })
-
+                    buses_calculados.append({"id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual, "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), "vel": vel, "limite": limite_zona, "electrico": es_electrico})
                     sector = determinar_sector(lat_snap, lon_snap)
-                    tiempo_abandono_simulado = random.randint(3, 25)
-                    tramo_preciso = generar_tramo_realista_por_sector(sector)
 
-                    datos_evento = {
-                        "ID Alerta": f"ALT-{random.randint(100,999)}", 
-                        "Patente": patente, 
-                        "Servicio": linea_asignada,
-                        "Variante": variante_exacta,
-                        "Infracción": estado, 
-                        "Tramo Afectado": tramo_preciso,
-                        "Sector Comuna": sector, 
-                        "Hora Control": hora_actual_str,
-                        "Tiempo de Abandono": f"{tiempo_abandono_simulado} min",
-                        "Latitud": lat_snap, 
-                        "Longitud": lon_snap,
-                        "Segmento_Ruta": trazado_infractor
-                    }
+                    datos_evento = {"ID Alerta": f"ALT-{random.randint(100,999)}", "Patente": patente, "Servicio": linea_asignada, "Variante": variante_exacta, "Infracción": estado, "Tramo Afectado": generar_tramo_realista_por_sector(sector), "Sector Comuna": sector, "Hora Control": hora_actual_str, "Tiempo de Abandono": f"{random.randint(3, 25)} min", "Latitud": lat_snap, "Longitud": lon_snap, "Segmento_Ruta": trazado_infractor, "oculta": False}
 
-                    if estado == "Operación Normal":
-                        st.session_state.historial_ok.append(datos_evento)
-                    else:
-                        st.session_state.alertas.append(datos_evento)
-                        nuevas_notificaciones.append(datos_evento)
+                    if estado == "Operación Normal": st.session_state.historial_ok.append(datos_evento)
+                    else: st.session_state.alertas.append(datos_evento); nuevas_notificaciones.append(datos_evento)
             
             st.session_state.buses_en_vivo = buses_calculados
+            if nuevas_notificaciones: st.toast(f"📱 Se han consolidado nuevas alertas en la fila.", icon="📲")
 
-            if nuevas_notificaciones:
-                for idx, notif in enumerate(nuevas_notificaciones):
-                    if idx < 3: 
-                        icono = "⚠️" if "Terminal" in notif['Infracción'] else "🚨"
-                        st.toast(f"**{notif['Infracción']}**\n\nPatente: {notif['Patente']} - Línea: {notif['Servicio']}", icon=icono)
-                if len(nuevas_notificaciones) > 3:
-                    st.toast(f"📱 ... y {len(nuevas_notificaciones) - 3} alertas adicionales. Revisa el panel lateral.", icon="📲")
-
-    # ==========================================
-    # BARRA LATERAL: CENTRO DE NOTIFICACIONES 
-    # ==========================================
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 🔔 Centro de Notificaciones")
-    if st.session_state.alertas:
-        for a in st.session_state.alertas:
-            color_borde = "#ff7f0e" if "Terminal" in a['Infracción'] else "#d62728"
-            icono_noti = "⚠️" if "Terminal" in a['Infracción'] else "🚨"
-            
-            with st.sidebar.container(border=True):
-                st.markdown(f"<p style='color:{color_borde}; font-weight:bold; margin-bottom:2px;'>{icono_noti} {a['Infracción']}</p>", unsafe_allow_html=True)
-                st.caption(f"**PPU:** {a['Patente']} | **Línea:** {a['Servicio']}")
-                
-                if st.button("📍 Localizar Infracción", key=f"btn_loc_{a['ID Alerta']}", use_container_width=True):
-                    st.session_state.alerta_focus = a
-                    st.rerun()
-    else:
-        st.sidebar.info("No hay incidentes reportados en este momento.")
-
-    # ==========================================
-    # PANEL DE CONTROL ESTRUCTURADO 
-    # ==========================================
-    st.markdown("### 🔍 Panel de control")
+    alertas_visibles = [a for a in st.session_state.alertas if not a.get("oculta", False)]
     
+    if alertas_visibles:
+        for idx, a in enumerate(st.session_state.alertas):
+            if not a.get("oculta", False):
+                color_borde = "#ff7f0e" if "Terminal" in a['Infracción'] else "#EF3340"
+                icono_noti = "⚠️" if "Terminal" in a['Infracción'] else "🚨"
+                with st.sidebar.container(border=True):
+                    st.markdown(f"<p style='color:{color_borde} !important; font-weight:bold; margin-bottom:2px;'>{icono_noti} {a['Infracción']}</p>", unsafe_allow_html=True)
+                    st.caption(f"**PPU:** {a['Patente']} | **Línea:** {a['Servicio']}")
+                    if st.session_state.role == "admin":
+                        c_ver, c_ok, c_del = st.columns([2, 1, 1])
+                        with c_ver:
+                            if st.button("📍 Ver", key=f"loc_{a['ID Alerta']}", use_container_width=True):
+                                st.session_state.alerta_focus = a; st.rerun()
+                        with c_ok:
+                            if st.button("✅", key=f"ok_{a['ID Alerta']}", use_container_width=True):
+                                st.session_state.alertas[idx]["oculta"] = True; st.rerun()
+                        with c_del:
+                            if st.button("❌", key=f"del_{a['ID Alerta']}", use_container_width=True):
+                                st.session_state.alertas[idx]["oculta"] = True; st.rerun()
+                    else:
+                        if st.button("📍 Localizar Infracción", key=f"loc_visor_{a['ID Alerta']}", use_container_width=True):
+                            st.session_state.alerta_focus = a; st.rerun()
+    else:
+        st.sidebar.info("No hay incidentes reportados.")
+
+    # --- TARJETAS KPI ---
+    total_buses = len(st.session_state.buses_en_vivo)
+    buses_alertas = len(st.session_state.alertas)
+    buses_normales = total_buses - buses_alertas
+    c1, c2, c3 = st.columns(3)
+    with c1: st.markdown(f"<div class='kpi-container'><div class='kpi-icon'>🚍</div><div class='kpi-content'><div class='kpi-title'>Total Flota Activa</div><div class='kpi-value'>{total_buses}</div></div></div>", unsafe_allow_html=True)
+    with c2: st.markdown(f"<div class='kpi-container'><div class='kpi-icon'>✅</div><div class='kpi-content'><div class='kpi-title'>Operación en Norma</div><div class='kpi-value'>{max(0, buses_normales)}</div></div></div>", unsafe_allow_html=True)
+    with c3: st.markdown(f"<div class='kpi-container'><div class='kpi-icon'>🚨</div><div class='kpi-content'><div class='kpi-title'>Alertas Críticas</div><div class='kpi-value'>{buses_alertas}</div></div></div>", unsafe_allow_html=True)
+
+    # --- PANEL DE FILTROS ---
     opciones_lineas = list(lineas_dict.keys()) if lineas_dict else []
     opciones_infracciones = list(set([a["Infracción"] for a in st.session_state.alertas])) if st.session_state.alertas else ["Todas"]
 
     with st.container(border=True):
+        st.markdown("<h4 style='margin-top: 0; margin-bottom: 10px; color: white;'>🔍 Filtros de Operación</h4>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1: filtro_linea = st.selectbox("📋 Línea", ["Todas"] + opciones_lineas)
         opciones_variantes_crudas = set()
@@ -326,14 +271,12 @@ else:
                         if 'variante' in seg: opciones_variantes_crudas.add(seg['variante'].upper())
         opciones_variantes = sorted(list(opciones_variantes_crudas))
         with col2: filtro_variante = st.selectbox("🔀 Variante", ["Todas"] + opciones_variantes)
-        
         col3, col4, col5 = st.columns(3)
         with col3: filtro_infraccion = st.selectbox("🚦 Estado Operativo", ["Todas"] + opciones_infracciones)
         with col4: filtro_tecnologia = st.selectbox("⚡ Tecnología", ["Todas", "Solo Eléctricos", "Solo Diésel"])
         with col5: buscar_patente_input = st.text_input("🔎 Placa Patente (P.P.U)", "")
 
     buscar_patente = buscar_patente_input.strip().upper()
-
     buses_filtrados = st.session_state.buses_en_vivo
     alertas_filtradas = st.session_state.alertas
     historial_ok_filtrado = st.session_state.historial_ok
@@ -342,23 +285,21 @@ else:
         buses_filtrados = [b for b in buses_filtrados if b["linea"] == filtro_linea]
         alertas_filtradas = [a for a in alertas_filtradas if a["Servicio"] == filtro_linea]
         historial_ok_filtrado = [h for h in historial_ok_filtrado if h["Servicio"] == filtro_linea]
-        
     if filtro_infraccion != "Todas":
         buses_filtrados = [b for b in buses_filtrados if b["estado"] == filtro_infraccion]
         alertas_filtradas = [a for a in alertas_filtradas if a["Infracción"] == filtro_infraccion]
         historial_ok_filtrado = [h for h in historial_ok_filtrado if h["Infracción"] == filtro_infraccion]
-
     if buscar_patente:
         buses_filtrados = [b for b in buses_filtrados if buscar_patente in b["id"].upper()]
         alertas_filtradas = [a for a in alertas_filtradas if buscar_patente in a["Patente"].upper()]
         historial_ok_filtrado = [h for h in historial_ok_filtrado if buscar_patente in h["Patente"].upper()]
 
+    st.write("") 
     tab1, tab2 = st.tabs(["🛰️ Monitoreo en Tiempo Real", "🔥 Análisis de Cobertura y Trazados"])
 
     with tab1:
         mapa_vivo = folium.Map(location=[-34.1708, -70.7444], zoom_start=13)
         folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite (Híbrida)').add_to(mapa_vivo)
-
         colores_lineas = ["#E6194B", "#4363D8", "#469990", "#F58231", "#911EB4", "#00FFFF", "#F032E6"] 
 
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
@@ -366,21 +307,13 @@ else:
                 for segmento_obj in datos['rutas']:
                     var_name = segmento_obj.get('variante', '').upper()
                     if filtro_variante != "Todas" and filtro_variante != var_name: continue
-                        
-                    folium.PolyLine(
-                        segmento_obj['trazado'], 
-                        color=colores_lineas[idx % len(colores_lineas)], 
-                        weight=4, opacity=0.9, 
-                        tooltip=f"Línea: {lbl} | Variante: {segmento_obj.get('variante', '')}",
-                        popup=f"<div style='font-size:12px; width:180px;'><b>Línea Base:</b> {lbl}<br><b>Variante:</b> {segmento_obj.get('variante', '')}</div>"
-                    ).add_to(mapa_vivo)
+                    folium.PolyLine(segmento_obj['trazado'], color=colores_lineas[idx % len(colores_lineas)], weight=4, opacity=0.9, tooltip=f"Línea: {lbl} | Variante: {segmento_obj.get('variante', '')}").add_to(mapa_vivo)
 
         for bus in buses_filtrados:
             es_electrico = bus.get('electrico', False)
             icon_color = "green" if es_electrico and bus['estado'] == "Operación Normal" else bus['color']
             icon_tipo = "bolt" if es_electrico else "bus"
             tec_text = "⚡ Eléctrico" if es_electrico else "Diésel"
-            
             html_pop = f"<div style='font-size: 12px; width: 200px;'><b>Patente:</b> {bus['id']}<br><b>Servicio:</b> {bus['linea']}<br><b>Tecnología:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
             folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
         
@@ -389,7 +322,6 @@ else:
 
     with tab2:
         st.markdown("#### 🗺️ Análisis de Operación y Trazados Inteligentes")
-        
         centro_mapa = [-34.1708, -70.7444]
         zoom_mapa = 13
         if st.session_state.alerta_focus is not None:
@@ -398,10 +330,8 @@ else:
             st.info(f"📍 Mostrando en el mapa: **{st.session_state.alerta_focus['Infracción']}** de la patente **{st.session_state.alerta_focus['Patente']}**")
         
         mapa_calor = folium.Map(location=centro_mapa, zoom_start=zoom_mapa, tiles=None)
-        
         folium.TileLayer('CartoDB dark_matter', name='Modo Oscuro (Gris/Negro)', control=True).add_to(mapa_calor)
         folium.TileLayer('OpenStreetMap', name='Modo Claro (Estándar)', control=True).add_to(mapa_calor)
-        folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite (Híbrida)').add_to(mapa_calor)
         
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
             if filtro_linea == "Todas" or filtro_linea == lbl:
@@ -415,42 +345,16 @@ else:
         for evt in eventos_completos:
             segmento_infractor = evt.get("Segmento_Ruta", [])
             if not segmento_infractor: segmento_infractor = [[evt["Latitud"], evt["Longitud"]], [evt["Latitud"]+0.0001, evt["Longitud"]+0.0001]]
-
             if evt["Infracción"] == "Operación Normal":
                 folium.PolyLine(segmento_infractor, color="#2ca02c", weight=4, opacity=0.7).add_to(mapa_calor)
             else:
-                if "Terminal" in evt["Infracción"]:
-                    color_linea = "#ff7f0e"
-                    titulo_tarjeta = f"⚠️ {evt['Infracción']}"
-                    icono_marker = "info-sign"
-                else:
-                    color_linea = "#d62728"
-                    titulo_tarjeta = f"🚨 {evt['Infracción']}"
-                    icono_marker = "exclamation-triangle"
-
-                html_popup = f"""
-                <div style='font-family: Arial; font-size: 13px; width: 240px;'>
-                    <b style='color: {color_linea}; font-size: 14px;'>{titulo_tarjeta}</b><br><br>
-                    <b>Línea:</b> {evt['Servicio']}<br>
-                    <b>Variante:</b> {evt['Variante']}<br>
-                    <b>Calles/Rutas:</b> <span style='color: #1565c0; font-weight: bold;'>{evt['Tramo Afectado']}</span><br>
-                    <b>Sector:</b> {evt['Sector Comuna']}<br>
-                    <b>Hora Evento:</b> {evt['Hora Control']}<br>
-                    <b>Tiempo Estado:</b> <span style='color: #444; font-weight: bold;'>{evt['Tiempo de Abandono']}</span><br>
-                    <hr style='margin: 6px 0; border-color: #ccc;'>
-                    <b>Patente Involucrada:</b> {evt['Patente']}
-                </div>
-                """
-                
-                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.85, popup=folium.Popup(html_popup, max_width=280)).add_to(mapa_calor)
-                folium.Marker(
-                    location=[evt["Latitud"], evt["Longitud"]],
-                    icon=folium.Icon(color="red" if color_linea=="#d62728" else "orange", icon=icono_marker, prefix='fa'),
-                    popup=folium.Popup(html_popup, max_width=280)
-                ).add_to(mapa_calor)
+                color_linea = "#ff7f0e" if "Terminal" in evt["Infracción"] else "#d62728"
+                icono_marker = "info-sign" if "Terminal" in evt["Infracción"] else "exclamation-triangle"
+                html_popup = f"<div style='font-family: Arial; font-size: 13px; width: 240px;'><b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br><b>Línea:</b> {evt['Servicio']}<br><b>Calles/Rutas:</b> {evt['Tramo Afectado']}<br><b>Sector:</b> {evt['Sector Comuna']}<br><b>Patente:</b> {evt['Patente']}</div>"
+                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.85).add_to(mapa_calor)
+                folium.Marker(location=[evt["Latitud"], evt["Longitud"]], icon=folium.Icon(color="red" if color_linea=="#d62728" else "orange", icon=icono_marker, prefix='fa'), popup=folium.Popup(html_popup, max_width=280)).add_to(mapa_calor)
             
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
-        # MAPA 2 CON KEY ÚNICA
         st_folium(mapa_calor, width="100%", height=450, returned_objects=[], key="mapa_calor_unico")
         
         st.markdown("---")
@@ -459,42 +363,31 @@ else:
         if alertas_filtradas:
             df_alertas_f = pd.DataFrame(alertas_filtradas)
             df_abandonos = df_alertas_f[df_alertas_f["Infracción"].isin(["Abandono de Trazado", "Acorte/Cambio de Recorrido"])]
-            
             if not df_abandonos.empty:
-                agrupado = df_abandonos.groupby(["Sector Comuna", "Tramo Afectado"]).agg(
-                    Servicios=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
-                    Ultimo_Registro=('Hora Control', 'max')
-                ).reset_index()
-                
+                agrupado = df_abandonos.groupby(["Sector Comuna", "Tramo Afectado"]).agg(Servicios=('Servicio', lambda x: ", ".join(sorted(x.unique()))), Ultimo_Registro=('Hora Control', 'max')).reset_index()
                 for _, row in agrupado.iterrows():
-                    st.error(f"📍 **Falla en Sector {row['Sector Comuna']}** | El tramo **{row['Tramo Afectado']}** ha sido abandonado por el servicio: **{row['Servicios']}** (Último registro: {row['Ultimo_Registro']}).")
+                    st.markdown(f"<div style='background-color: #1A0505; border: 1px solid #FF3333; border-left: 5px solid #FF3333; padding: 15px; border-radius: 5px; margin-bottom: 12px;'><h5 style='color: #FF3333; margin: 0 0 5px 0;'>🚨 ALERTA DE COBERTURA: EJE VIAL ABANDONADO</h5><p style='color: #E0E0E0; margin: 0;'>Sector: {row['Sector Comuna']} | Tramo: {row['Tramo Afectado']}</p></div>", unsafe_allow_html=True)
             else:
-                st.success("✅ No se registran desvíos críticos que impliquen el abandono de ejes viales en este momento.")
+                st.success("✅ No se registran desvíos críticos.")
             
             st.markdown("---")
             st.subheader("Libro Estadístico de Infracciones Operativas")
-            st.dataframe(df_alertas_f.drop(columns=['Latitud', 'Longitud', 'Segmento_Ruta'], errors='ignore'), use_container_width=True)
+            columnas_a_quitar = ['Latitud', 'Longitud', 'Segmento_Ruta', 'oculta']
+            df_limpio = df_alertas_f.drop(columns=[c for c in columnas_a_quitar if c in df_alertas_f.columns], errors='ignore')
+            st.dataframe(df_limpio, use_container_width=True)
             
             def generar_excel_multitaba(df_completo, df_ab):
                 out = BytesIO()
                 with pd.ExcelWriter(out, engine='openpyxl') as w:
-                    df_completo.drop(columns=['Latitud', 'Longitud', 'Segmento_Ruta'], errors='ignore').to_excel(w, index=False, sheet_name='Fiscalizacion_Detallada')
-                    
+                    df_completo.to_excel(w, index=False, sheet_name='Fiscalizacion_Detallada')
                     if not df_ab.empty:
-                        resumen = df_ab.groupby(["Sector Comuna", "Tramo Afectado"]).agg(
-                            Servicios_Ausentes=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
-                            Ultimo_Registro_Control=('Hora Control', 'max'),
-                            Casos_Registrados=('ID Alerta', 'count')
-                        ).reset_index()
+                        resumen = df_ab.groupby(["Sector Comuna", "Tramo Afectado"]).agg(Servicios_Ausentes=('Servicio', lambda x: ", ".join(sorted(x.unique()))), Casos_Registrados=('ID Alerta', 'count')).reset_index()
                         resumen.to_excel(w, index=False, sheet_name='Resumen_Calles_Abandonadas')
-                    else:
-                        pd.DataFrame([{"Mensaje": "Sin reportes de abandono vial en este período de control."}]).to_excel(w, index=False, sheet_name='Resumen_Calles_Abandonadas')
                 return out.getvalue()
             
-            st.download_button(
-                "📥 Exportar Libro S.V.R a Excel (.xlsx)", 
-                data=generar_excel_multitaba(df_alertas_f, df_abandonos), 
-                file_name="Reporte_SVR_ValidacionEnRed.xlsx"
-            )
+            if st.session_state.role == "admin":
+                st.download_button("📥 Exportar Libro S.V.R a Excel (.xlsx)", data=generar_excel_multitaba(df_limpio, df_abandonos), file_name="Reporte_SVR_ValidacionEnRed.xlsx")
+            else:
+                st.info("🔒 La exportación del Libro Operativo (Excel) es una función exclusiva del Administrador.")
         else:
             st.info("Inicie el motor de análisis en vivo para consolidar el reporte territorial.")
