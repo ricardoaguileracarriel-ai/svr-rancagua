@@ -1,8 +1,12 @@
-# Archivo de inicialización del módulo SVR. (Puede quedar así en blanco).import sqlite3
+import sqlite3
 import json
+import os
 from datetime import datetime
 
-DB_PATH = "archivo_svr.db"
+# Ruta absoluta anclada a la carpeta de este archivo (modulos/), no al directorio
+# desde el que se ejecute streamlit. Evita errores de "unable to open database
+# file" cuando el CWD no tiene permisos o cambia según cómo se lance la app.
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "archivo_svr.db")
 
 # Campos del "datos_evento" que ya genera el motor de análisis en app.py.
 # Segmento_Ruta es una lista de coordenadas -> se guarda serializada en JSON.
@@ -15,19 +19,23 @@ CAMPOS = [
 
 def init_db():
     """Crea la tabla si no existe. Se llama una vez al iniciar la app."""
-    con = sqlite3.connect(DB_PATH)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS registros_historicos (
-            id_registro INTEGER PRIMARY KEY AUTOINCREMENT,
-            id_alerta TEXT, patente TEXT, servicio TEXT, variante TEXT,
-            infraccion TEXT, tramo_afectado TEXT, sector_comuna TEXT,
-            hora_control TEXT, tiempo_abandono TEXT,
-            latitud REAL, longitud REAL, segmento_ruta TEXT,
-            tipo TEXT, fecha_hora_archivo TEXT
-        )
-    """)
-    con.commit()
-    con.close()
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS registros_historicos (
+                id_registro INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_alerta TEXT, patente TEXT, servicio TEXT, variante TEXT,
+                infraccion TEXT, tramo_afectado TEXT, sector_comuna TEXT,
+                hora_control TEXT, tiempo_abandono TEXT,
+                latitud REAL, longitud REAL, segmento_ruta TEXT,
+                tipo TEXT, fecha_hora_archivo TEXT
+            )
+        """)
+        con.commit()
+        con.close()
+    except sqlite3.OperationalError as e:
+        import streamlit as st
+        st.error(f"⚠️ No se pudo crear/abrir la base de datos en '{DB_PATH}': {e}")
 
 
 def guardar_evento(datos_evento: dict, tipo: str):
