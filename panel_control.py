@@ -14,6 +14,7 @@ from modulos.motor_gps import (
     snap_punto_a_ruta, evaluar_operacion, determinar_sector, generar_tramo_realista_por_sector
 )
 from modulos.almacenamiento import init_db, guardar_evento, contar_registros_archivados, cargar_historico
+from modulos.informes import calcular_metricas, generar_pdf_informe, grafico_barras
 
 init_db()  # Se asegura que el archivador SQLite exista antes de usarlo.
 
@@ -440,7 +441,11 @@ else:
         historial_ok_filtrado = [h for h in historial_ok_filtrado if buscar_patente in h["Patente"].upper()]
 
     st.write("") 
-    tab1, tab2, tab3 = st.tabs(["🛰️ Monitoreo en Tiempo Real", "🔥 Análisis de Cobertura y Trazados", "🗄️ Archivo Histórico (SQLite)"])
+    etiquetas_tabs = ["🛰️ Monitoreo en Tiempo Real", "🔥 Análisis de Cobertura y Trazados", "🗄️ Archivo Histórico (SQLite)"]
+    es_admin = st.session_state.role == "admin"
+    if es_admin: etiquetas_tabs.append("📊 Informe Ejecutivo")
+    tabs = st.tabs(etiquetas_tabs)
+    tab1, tab2, tab3 = tabs[0], tabs[1], tabs[2]
 
     with tab1:
         mapa_vivo = folium.Map(location=[-34.1708, -70.7444], zoom_start=13)
@@ -569,3 +574,46 @@ else:
             )
         else:
             st.info("Aún no hay registros archivados en la base de datos.")
+
+    if es_admin:
+        with tabs[3]:
+            st.markdown("#### 📊 Informe Ejecutivo — Solo Administrador")
+            registros_completos = cargar_historico(limite=None)
+            if not registros_completos:
+                st.info("Aún no hay registros suficientes para emitir el informe.")
+            else:
+                df_hist_completo = pd.DataFrame(registros_completos)
+                m = calcular_metricas(df_hist_completo, df_padron)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Registros", m["total_registros"])
+                c2.metric("Total Infracciones", m["total_alertas"])
+                pct = f"{m['pct_flota_electrica']:.1f}%" if m["pct_flota_electrica"] is not None else "N/D"
+                c3.metric("% Flota Eléctrica Circulando", pct)
+
+                st.markdown("##### 📍 Lugares con Más Abandono de Servicio")
+                st.pyplot(grafico_barras(m["top_sectores_abandono"], "Top Sectores con Más Abandono", horizontal=True))
+                st.markdown("##### 🚌 Servicio con Más Infracciones")
+                st.pyplot(grafico_barras(m["top_servicios_infracciones"], "Servicios con Más Infracciones", horizontal=True))
+                st.markdown("##### 🔁 Patentes con Más Reincidencias")
+                st.pyplot(grafico_barras(m["top_patentes_infractoras"], "Patentes con Más Reincidencias", horizontal=True))
+                st.markdown("##### 🥧 Distribución por Tipo de Infracción")
+                st.pyplot(grafico_barras(m["distribucion_infracciones"], "Distribución por Tipo de Infracción", horizontal=True))
+
+                col_dia, col_hora = st.columns(2)
+                with col_dia:
+                    st.markdown("##### 📅 Infracciones por Día")
+                    st.pyplot(grafico_barras(m["infracciones_por_dia"], "Infracciones por Día de la Semana", color="#EF3340"))
+                    st.markdown("##### 📅 Abandonos por Día")
+                    st.pyplot(grafico_barras(m["abandono_por_dia"], "Abandonos por Día de la Semana", color="#EF3340"))
+                with col_hora:
+                    st.markdown("##### 🕐 Infracciones por Hora")
+                    st.pyplot(grafico_barras(m["infracciones_por_hora"], "Infracciones por Hora del Día", color="#2CA02C"))
+                    st.markdown("##### 🕐 Abandonos por Hora")
+                    st.pyplot(grafico_barras(m["abandono_por_hora"], "Abandonos por Hora del Día", color="#2CA02C"))
+
+                st.download_button(
+                    "📥 Descargar Informe Ejecutivo Completo (PDF)",
+                    data=generar_pdf_informe(df_hist_completo, df_padron),
+                    file_name="Informe_Ejecutivo_SVR.pdf", mime="application/pdf",
+                )

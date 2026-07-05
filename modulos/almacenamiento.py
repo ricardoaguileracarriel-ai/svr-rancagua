@@ -21,6 +21,7 @@ def init_db():
     """Crea la tabla si no existe. Se llama una vez al iniciar la app."""
     try:
         con = sqlite3.connect(DB_PATH)
+        con.execute("PRAGMA journal_mode=WAL;")  # Más resistente a cierres abruptos del proceso.
         con.execute("""
             CREATE TABLE IF NOT EXISTS registros_historicos (
                 id_registro INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,12 +74,24 @@ def contar_registros_archivados() -> int:
     return total
 
 
-def cargar_historico(limite: int = 500) -> list[dict]:
-    """Trae los últimos N registros archivados (para auditoría/consulta)."""
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    filas = con.execute(
-        "SELECT * FROM registros_historicos ORDER BY id_registro DESC LIMIT ?", (limite,)
-    ).fetchall()
-    con.close()
-    return [dict(f) for f in filas]
+def cargar_historico(limite: int | None = 500) -> list[dict]:
+    """Trae registros archivados. limite=None trae TODO el histórico (para informes)."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.row_factory = sqlite3.Row
+        if limite is None:
+            filas = con.execute("SELECT * FROM registros_historicos ORDER BY id_registro DESC").fetchall()
+        else:
+            filas = con.execute(
+                "SELECT * FROM registros_historicos ORDER BY id_registro DESC LIMIT ?", (limite,)
+            ).fetchall()
+        con.close()
+        return [dict(f) for f in filas]
+    except sqlite3.Error as e:
+        import streamlit as st
+        st.error(
+            f"⚠️ La base de datos '{DB_PATH}' parece dañada ({e}). "
+            "Ciérrala si está abierta en otro programa, o bórrala para regenerarla: "
+            f"elimina el archivo y vuelve a correr la app."
+        )
+        return []
