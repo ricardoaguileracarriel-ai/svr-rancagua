@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import folium
-from folium.plugins import Fullscreen, MarkerCluster
+from folium.plugins import Fullscreen, MarkerCluster, PolyLineTextPath, PolyLineTextPath
 from streamlit_folium import st_folium
 import random
 from datetime import datetime
@@ -387,11 +387,20 @@ else:
                     buses_calculados.append({"id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual, "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), "vel": vel, "limite": limite_zona, "electrico": es_electrico})
                     sector = determinar_sector(lat_snap, lon_snap)
 
-                    tramo_correcto = obtener_calle_real(lat_snap, lon_snap, sector)
-                    if comportamiento in ("ACORTE", "ABANDONO"):
-                        tramo_desviado = obtener_calle_real(lat_actual, lon_actual, sector)
+                    # La geocodificación real (obtener_calle_real) hace una consulta a
+                    # internet — antes se llamaba para los 20 buses en cada corrida,
+                    # incluidos los que están en "Operación Normal" (que ni siquiera
+                    # muestran ese dato en pantalla), y eso era lo que hacía tan lenta
+                    # toda la plataforma. Ahora solo se consulta para eventos con
+                    # alerta real, que normalmente son muchos menos por corrida.
+                    if estado == "Operación Normal":
+                        tramo_correcto = tramo_desviado = f"Sector {sector}"
                     else:
-                        tramo_desviado = tramo_correcto
+                        tramo_correcto = obtener_calle_real(lat_snap, lon_snap, sector)
+                        if comportamiento in ("ACORTE", "ABANDONO"):
+                            tramo_desviado = obtener_calle_real(lat_actual, lon_actual, sector)
+                        else:
+                            tramo_desviado = tramo_correcto
 
                     datos_evento = {
                         "ID Alerta": f"ALT-{random.randint(100,999)}", "Patente": patente,
@@ -406,6 +415,7 @@ else:
                         "Segmento_Ruta": trazado_infractor,
                         "Segmento_Correcto": segmento_correcto,
                         "Segmento_Desviado": segmento_desviado,
+                        "Es_Electrico": es_electrico,
                         "oculta": False
                     }
 
@@ -472,7 +482,9 @@ else:
 
     # --- PANEL DE FILTROS ---
     opciones_lineas = list(lineas_dict.keys()) if lineas_dict else []
-    opciones_infracciones = list(set([a["Infracción"] for a in st.session_state.alertas])) if st.session_state.alertas else ["Todas"]
+    opciones_infracciones_set = set(a["Infracción"] for a in st.session_state.alertas)
+    if st.session_state.historial_ok: opciones_infracciones_set.add("Operación Normal")
+    opciones_infracciones = sorted(opciones_infracciones_set)
 
     with st.container(border=True, key="panel_filtros"):
         st.markdown("<h4 style='margin-top: 0; margin-bottom: 10px; color: white;'>🔍 Filtros de Operación</h4>", unsafe_allow_html=True)
@@ -508,6 +520,11 @@ else:
         buses_filtrados = [b for b in buses_filtrados if buscar_patente in b["id"].upper()]
         alertas_filtradas = [a for a in alertas_filtradas if buscar_patente in a["Patente"].upper()]
         historial_ok_filtrado = [h for h in historial_ok_filtrado if buscar_patente in h["Patente"].upper()]
+    if filtro_tecnologia != "Todas":
+        quiere_electrico = (filtro_tecnologia == "Solo Eléctricos")
+        buses_filtrados = [b for b in buses_filtrados if b.get("electrico", False) == quiere_electrico]
+        alertas_filtradas = [a for a in alertas_filtradas if a.get("Es_Electrico", False) == quiere_electrico]
+        historial_ok_filtrado = [h for h in historial_ok_filtrado if h.get("Es_Electrico", False) == quiere_electrico]
 
     st.write("") 
     etiquetas_tabs = ["🛰️ Monitoreo en Tiempo Real", "🔥 Análisis de Cobertura y Trazados", "🗄️ Archivo Histórico (SQLite)"]
@@ -574,9 +591,6 @@ else:
                 for segmento_obj in datos['rutas']:
                     var_name = segmento_obj.get('variante', '').upper()
                     if filtro_variante != "Todas" and filtro_variante != var_name: continue
-                    # Trazado OFICIAL completo del servicio, siempre visible en verde
-                    # (antes era una franja gris tenue de referencia; ahora es la
-                    # línea verde de "esto es lo que debía circular").
                     folium.PolyLine(segmento_obj['trazado'], color="#2ca02c", weight=4, opacity=0.75,
                                     tooltip=f"Trazado oficial — Línea {lbl}").add_to(mapa_calor)
 
@@ -596,8 +610,23 @@ else:
                 # ACORTE / ABANDONO: el trazado correcto ya está en verde (capa base);
                 # solo se dibuja encima el camino real (por calles, vía OSRM) que
                 # tomó el bus, que sale y vuelve a unirse al trazado oficial.
-                folium.PolyLine(seg_desviado, color="#d62728", weight=5, opacity=0.9,
+                linea_desvio = folium.PolyLine(seg_desviado, color="#d62728", weight=5, opacity=0.9,
                                 tooltip="Desviación real (acorte/abandono)").add_to(mapa_calor)
+
+                # Punto donde se sale del trazado oficial ("salida") y punto donde
+                # vuelve a unírsele ("reingreso") — para que quede claro el patrón
+                # "salió aquí, volvió acá" sin tener que seguir la línea con la vista.
+                folium.CircleMarker(
+                    location=seg_desviado[0], radius=6, color="#ffffff", weight=2,
+                    fill=True, fill_color="#d62728", fill_opacity=1,
+                    tooltip="🔴 Salida del trazado oficial",
+                ).add_to(mapa_calor)
+                folium.CircleMarker(
+                    location=seg_desviado[-1], radius=6, color="#ffffff", weight=2,
+                    fill=True, fill_color="#2ca02c", fill_opacity=1,
+                    tooltip="🟢 Reingreso al trazado oficial",
+                ).add_to(mapa_calor)
+
                 html_popup = (
                     f"<div style='font-family: Arial; font-size: 13px; width: 260px;'>"
                     f"<b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br>"
