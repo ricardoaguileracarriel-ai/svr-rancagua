@@ -39,11 +39,41 @@ def init_db():
         st.error(f"⚠️ No se pudo crear/abrir la base de datos en '{DB_PATH}': {e}")
 
 
+def guardar_lote(eventos: list[tuple[dict, str]]):
+    """
+    Archiva TODOS los eventos de una corrida del motor en una sola conexión/transacción
+    (executemany), en vez de abrir+cerrar una conexión por cada bus. Mucho más rápido
+    cuando la flota simulada/real crece. eventos = [(datos_evento, "OK"|"ALERTA"), ...]
+    """
+    if not eventos:
+        return
+    filas = [
+        (
+            d.get("ID Alerta"), d.get("Patente"), d.get("Servicio"), d.get("Variante"),
+            d.get("Infracción"), d.get("Tramo Afectado"), d.get("Sector Comuna"),
+            d.get("Hora Control"), d.get("Tiempo de Abandono"), d.get("Latitud"),
+            d.get("Longitud"), json.dumps(d.get("Segmento_Ruta")),
+            tipo, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        for d, tipo in eventos
+    ]
+    con = sqlite3.connect(DB_PATH)
+    con.executemany(
+        """INSERT INTO registros_historicos
+           (id_alerta, patente, servicio, variante, infraccion, tramo_afectado,
+            sector_comuna, hora_control, tiempo_abandono, latitud, longitud,
+            segmento_ruta, tipo, fecha_hora_archivo)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        filas,
+    )
+    con.commit()
+    con.close()
+
+
 def guardar_evento(datos_evento: dict, tipo: str):
     """
-    Archiva UN evento (OK o Alerta) de forma permanente. tipo = "OK" | "ALERTA".
-    Se llama automáticamente cada vez que el motor de análisis genera un evento,
-    para que ningún registro se pierda aunque se reinicie la sesión o el servidor.
+    Archiva UN evento suelto (uso puntual/manual). Para archivar muchos eventos de
+    una corrida del motor, usar guardar_lote() en su lugar (mucho más eficiente).
     """
     con = sqlite3.connect(DB_PATH)
     con.execute(

@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import folium
-from folium.plugins import Fullscreen
+from folium.plugins import Fullscreen, MarkerCluster
 from streamlit_folium import st_folium
 import random
 from datetime import datetime
@@ -11,12 +11,26 @@ import os
 # --- IMPORTACIÓN DE NUESTROS MÓDULOS SEPARADOS ---
 from modulos.ingesta_datos import extraer_coordenadas_kmz, cargar_padron_matricial
 from modulos.motor_gps import (
-    snap_punto_a_ruta, evaluar_operacion, determinar_sector, generar_tramo_realista_por_sector
+    snap_punto_a_ruta, evaluar_operacion, determinar_sector,
+    obtener_calle_real, generar_desviacion
 )
-from modulos.almacenamiento import init_db, guardar_evento, contar_registros_archivados, cargar_historico
+from modulos.almacenamiento import init_db, guardar_evento, guardar_lote, contar_registros_archivados, cargar_historico
 from modulos.informes import calcular_metricas, generar_pdf_informe, grafico_barras
 
 init_db()  # Se asegura que el archivador SQLite exista antes de usarlo.
+
+
+@st.cache_data(show_spinner="📂 Procesando archivo KMZ...")
+def procesar_kmz_cacheado(archivo_o_ruta, marca_tiempo=None):
+    """Cachea el parseo de cada KMZ. marca_tiempo (mtime del archivo) fuerza
+    recalcular si el archivo local cambió; para archivos subidos no se necesita
+    porque Streamlit ya cachea por contenido."""
+    return extraer_coordenadas_kmz(archivo_o_ruta)
+
+
+@st.cache_data(show_spinner="📂 Procesando padrón de patentes...")
+def cargar_padron_cacheado(archivo_padron, nombres_servicios_reales, marca_tiempo=None):
+    return cargar_padron_matricial(archivo_padron, nombres_servicios_reales)
 
 # 1. Configuración de la plataforma
 st.set_page_config(layout="wide", page_title="Sistema de Validación en Red (S.V.R)", page_icon="🖥️")
@@ -289,11 +303,15 @@ else:
     if archivos_kmz_procesar:
         for nombre_archivo, archivo_o_ruta in archivos_kmz_procesar:
             nombre_servicio = nombre_archivo.split(".")[0].upper()
-            datos_kmz = extraer_coordenadas_kmz(archivo_o_ruta)
+            # Si es una ruta local (visor), paso el mtime para invalidar el caché
+            # automáticamente cuando el archivo cambie en disco.
+            mtime = os.path.getmtime(archivo_o_ruta) if isinstance(archivo_o_ruta, str) else None
+            datos_kmz = procesar_kmz_cacheado(archivo_o_ruta, mtime)
             if datos_kmz: lineas_dict[nombre_servicio] = datos_kmz
 
     nombres_servicios_reales = list(lineas_dict.keys())
-    df_padron = cargar_padron_matricial(archivo_padron, nombres_servicios_reales) if archivo_padron else None
+    mtime_padron = os.path.getmtime(archivo_padron) if isinstance(archivo_padron, str) else None
+    df_padron = cargar_padron_cacheado(archivo_padron, nombres_servicios_reales, mtime_padron) if archivo_padron else None
     
     if df_padron is not None:
         total_electricos = df_padron['Es_Electrico'].sum() if 'Es_Electrico' in df_padron.columns else 0
@@ -313,6 +331,7 @@ else:
             hora_actual_str = hora_actual_dt.strftime("%H:%M:%S")
             buses_calculados = []
             nuevas_notificaciones = []
+            eventos_para_archivar = []
             
             es_horario_comercial = 5 <= hora_actual_dt.hour < 22
             if not es_horario_comercial: st.toast("🌙 Sistema operando en horario nocturno.", icon="🌙")
@@ -336,29 +355,70 @@ else:
                     else: comportamiento = random.choices(["OK", "TERMINAL", "ACORTE", "ABANDONO", "VELOCIDAD"], weights=[65, 5, 10, 10, 10])[0]
                     
                     limite_zona = 50
-                    if comportamiento == "OK": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0001, 0.0001), punto_base[1] + random.uniform(-0.0001, 0.0001), random.randint(25, 48)
-                    elif comportamiento == "TERMINAL": lat_actual, lon_actual, vel = (trazado_puntos[0][0], trazado_puntos[0][1], 0) if random.choice([True, False]) else (trazado_puntos[-1][0], trazado_puntos[-1][1], 0)
-                    elif comportamiento == "VELOCIDAD": lat_actual, lon_actual, vel = punto_base[0], punto_base[1], random.randint(55, 75)
-                    elif comportamiento == "ACORTE": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0007, 0.001), punto_base[1] + random.uniform(-0.0007, 0.001), random.randint(30, 48)
-                    elif comportamiento == "ABANDONO": lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.002, 0.003), punto_base[1] + random.uniform(-0.002, 0.003), random.randint(30, 48)
-                        
+                    segmento_correcto = []
+                    segmento_desviado = []
+                    tramo_correcto = ""
+                    tramo_desviado = ""
+
+                    if comportamiento == "OK":
+                        lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0001, 0.0001), punto_base[1] + random.uniform(-0.0001, 0.0001), random.randint(25, 48)
+                    elif comportamiento == "TERMINAL":
+                        lat_actual, lon_actual, vel = (trazado_puntos[0][0], trazado_puntos[0][1], 0) if random.choice([True, False]) else (trazado_puntos[-1][0], trazado_puntos[-1][1], 0)
+                    elif comportamiento == "VELOCIDAD":
+                        lat_actual, lon_actual, vel = punto_base[0], punto_base[1], random.randint(55, 75)
+                    elif comportamiento == "ACORTE":
+                        seg_correcto, seg_desviado, idx_ini, idx_fin = generar_desviacion(trazado_puntos)
+                        segmento_correcto = seg_correcto
+                        segmento_desviado = seg_desviado
+                        pt_desv = segmento_desviado[len(segmento_desviado) // 2]
+                        lat_actual, lon_actual = pt_desv[0], pt_desv[1]
+                        vel = random.randint(30, 48)
+                    elif comportamiento == "ABANDONO":
+                        seg_correcto, seg_desviado, idx_ini, idx_fin = generar_desviacion(trazado_puntos)
+                        segmento_correcto = seg_correcto
+                        segmento_desviado = seg_desviado
+                        pt_desv = segmento_desviado[len(segmento_desviado) // 2]
+                        lat_actual, lon_actual = pt_desv[0], pt_desv[1]
+                        vel = random.randint(30, 48)
+
                     estado, dist_error = evaluar_operacion(lat_actual, lon_actual, rutas_obj, vel, limite_zona, paraderos_obj)
                     lat_snap, lon_snap, variante_exacta, trazado_infractor = snap_punto_a_ruta(lat_actual, lon_actual, rutas_obj)
 
                     buses_calculados.append({"id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual, "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), "vel": vel, "limite": limite_zona, "electrico": es_electrico})
                     sector = determinar_sector(lat_snap, lon_snap)
 
-                    datos_evento = {"ID Alerta": f"ALT-{random.randint(100,999)}", "Patente": patente, "Servicio": linea_asignada, "Variante": variante_exacta, "Infracción": estado, "Tramo Afectado": generar_tramo_realista_por_sector(sector), "Sector Comuna": sector, "Hora Control": hora_actual_str, "Tiempo de Abandono": f"{random.randint(3, 25)} min", "Latitud": lat_snap, "Longitud": lon_snap, "Segmento_Ruta": trazado_infractor, "oculta": False}
+                    tramo_correcto = obtener_calle_real(lat_snap, lon_snap, sector)
+                    if comportamiento in ("ACORTE", "ABANDONO"):
+                        tramo_desviado = obtener_calle_real(lat_actual, lon_actual, sector)
+                    else:
+                        tramo_desviado = tramo_correcto
+
+                    datos_evento = {
+                        "ID Alerta": f"ALT-{random.randint(100,999)}", "Patente": patente,
+                        "Servicio": linea_asignada, "Variante": variante_exacta,
+                        "Infracción": estado,
+                        "Tramo Afectado": tramo_correcto,
+                        "Tramo Correcto": tramo_correcto,
+                        "Tramo Desviado": tramo_desviado,
+                        "Sector Comuna": sector, "Hora Control": hora_actual_str,
+                        "Tiempo de Abandono": f"{random.randint(3, 25)} min",
+                        "Latitud": lat_actual, "Longitud": lon_actual,
+                        "Segmento_Ruta": trazado_infractor,
+                        "Segmento_Correcto": segmento_correcto,
+                        "Segmento_Desviado": segmento_desviado,
+                        "oculta": False
+                    }
 
                     if estado == "Operación Normal":
                         st.session_state.historial_ok.append(datos_evento)
-                        guardar_evento(datos_evento, "OK")
+                        eventos_para_archivar.append((datos_evento, "OK"))
                     else:
                         st.session_state.alertas.append(datos_evento)
                         nuevas_notificaciones.append(datos_evento)
-                        guardar_evento(datos_evento, "ALERTA")
+                        eventos_para_archivar.append((datos_evento, "ALERTA"))
             
             st.session_state.buses_en_vivo = buses_calculados
+            guardar_lote(eventos_para_archivar)
             if nuevas_notificaciones: st.toast(f"📱 Se han consolidado nuevas alertas en la fila.", icon="📲")
 
     st.sidebar.caption(f"🗄️ Archivador SQLite: {contar_registros_archivados()} registros permanentes.")
@@ -374,12 +434,19 @@ else:
                 icono_noti = "⚠️" if "Terminal" in a['Infracción'] else "🚨"
                 with st.sidebar.container(border=True):
                     st.markdown(f"<p style='color:{color_borde} !important; font-weight:bold; margin-bottom:2px;'>{icono_noti} {a['Infracción']}</p>", unsafe_allow_html=True)
-                    st.caption(f"**PPU:** {a['Patente']} | **Línea:** {a['Servicio']}")
+                    tramo_correcto = a.get("Tramo Correcto", a.get("Tramo Afectado", ""))
+                    tramo_desviado = a.get("Tramo Desviado", "")
+                    detalle_noti = f"**PPU:** {a['Patente']} | **Línea:** {a['Servicio']}"
+                    if tramo_desviado and tramo_desviado != tramo_correcto:
+                        detalle_noti += f" | ✅ {tramo_correcto} | ❌ {tramo_desviado}"
+                    st.caption(detalle_noti)
                     if st.session_state.role == "admin":
                         c_ver, c_ok, c_del = st.columns([2, 1, 1])
                         with c_ver:
                             if st.button("📍 Ver", key=f"loc_{a['ID Alerta']}", use_container_width=True):
-                                st.session_state.alerta_focus = a; st.rerun()
+                                st.session_state.alerta_focus = a
+                                st.session_state.vista_activa = "🔥 Análisis de Cobertura y Trazados"
+                                st.rerun()
                         with c_ok:
                             if st.button("✅", key=f"ok_{a['ID Alerta']}", use_container_width=True):
                                 st.session_state.alertas[idx]["oculta"] = True; st.rerun()
@@ -388,7 +455,9 @@ else:
                                 st.session_state.alertas[idx]["oculta"] = True; st.rerun()
                     else:
                         if st.button("📍 Localizar Infracción", key=f"loc_visor_{a['ID Alerta']}", use_container_width=True):
-                            st.session_state.alerta_focus = a; st.rerun()
+                            st.session_state.alerta_focus = a
+                            st.session_state.vista_activa = "🔥 Análisis de Cobertura y Trazados"
+                            st.rerun()
     else:
         st.sidebar.info("No hay incidentes reportados.")
 
@@ -444,12 +513,20 @@ else:
     etiquetas_tabs = ["🛰️ Monitoreo en Tiempo Real", "🔥 Análisis de Cobertura y Trazados", "🗄️ Archivo Histórico (SQLite)"]
     es_admin = st.session_state.role == "admin"
     if es_admin: etiquetas_tabs.append("📊 Informe Ejecutivo")
-    tabs = st.tabs(etiquetas_tabs)
-    tab1, tab2, tab3 = tabs[0], tabs[1], tabs[2]
 
-    with tab1:
+    # st.tabs() no se puede cambiar por código (no existe "tab.select()" en Streamlit),
+    # por eso el botón "Ver" de una notificación no podía saltar de pestaña solo.
+    # Con un st.radio "atado" a session_state (key="vista_activa") sí se puede: el
+    # botón deja el valor deseado en session_state ANTES del rerun, y el radio lo
+    # adopta como su selección al volver a dibujarse.
+    if "vista_activa" not in st.session_state or st.session_state.vista_activa not in etiquetas_tabs:
+        st.session_state.vista_activa = etiquetas_tabs[0]
+    vista_activa = st.radio("Navegación", etiquetas_tabs, horizontal=True,
+                             label_visibility="collapsed", key="vista_activa")
+
+    if vista_activa == etiquetas_tabs[0]:
         mapa_vivo = folium.Map(location=[-34.1708, -70.7444], zoom_start=13)
-        folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite (Híbrida)').add_to(mapa_vivo)
+        folium.TileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', attr='Google', name='Satélite (Híbrida)', show=False).add_to(mapa_vivo)
         colores_lineas = ["#E6194B", "#4363D8", "#469990", "#F58231", "#911EB4", "#00FFFF", "#F032E6"] 
 
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
@@ -459,19 +536,22 @@ else:
                     if filtro_variante != "Todas" and filtro_variante != var_name: continue
                     folium.PolyLine(segmento_obj['trazado'], color=colores_lineas[idx % len(colores_lineas)], weight=4, opacity=0.9, tooltip=f"Línea: {lbl} | Variante: {segmento_obj.get('variante', '')}").add_to(mapa_vivo)
 
+        # disableClusteringAtZoom evita que se agrupen los buses cuando el usuario
+        # ya hizo zoom a nivel de calle (ahí sí quiere verlos separados).
+        cluster_buses = MarkerCluster(name="🚌 Buses en Circulación", disableClusteringAtZoom=15).add_to(mapa_vivo)
         for bus in buses_filtrados:
             es_electrico = bus.get('electrico', False)
             icon_color = "green" if es_electrico and bus['estado'] == "Operación Normal" else bus['color']
             icon_tipo = "bolt" if es_electrico else "bus"
             tec_text = "⚡ Eléctrico" if es_electrico else "Diésel"
             html_pop = f"<div style='font-size: 12px; width: 200px;'><b>Patente:</b> {bus['id']}<br><b>Servicio:</b> {bus['linea']}<br><b>Tecnología:</b> {tec_text}<br><b>Estado:</b> {bus['estado']}</div>"
-            folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(mapa_vivo)
+            folium.Marker([bus["lat"], bus["lon"]], icon=folium.Icon(color=icon_color, icon=icon_tipo, prefix='fa'), popup=folium.Popup(html_pop, max_width=250)).add_to(cluster_buses)
         
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_vivo)
         Fullscreen(position='topleft').add_to(mapa_vivo)
         st_folium(mapa_vivo, width="100%", height=550, returned_objects=[], key="mapa_vivo_unico")
 
-    with tab2:
+    if vista_activa == etiquetas_tabs[1]:
         st.markdown("#### 🗺️ Análisis de Operación y Trazados Inteligentes")
         centro_mapa = [-34.1708, -70.7444]
         zoom_mapa = 13
@@ -481,12 +561,12 @@ else:
             st.info(f"📍 Mostrando en el mapa: **{st.session_state.alerta_focus['Infracción']}** de la patente **{st.session_state.alerta_focus['Patente']}**")
         
         mapa_calor = folium.Map(location=centro_mapa, zoom_start=zoom_mapa, tiles=None)
-        folium.TileLayer('CartoDB dark_matter', name='Modo Oscuro (Gris/Negro)', control=True).add_to(mapa_calor)
-        folium.TileLayer('OpenStreetMap', name='Modo Claro (Estándar)', control=True).add_to(mapa_calor)
+        folium.TileLayer('CartoDB dark_matter', name='Modo Oscuro (Gris/Negro)', control=True, show=True).add_to(mapa_calor)
+        folium.TileLayer('OpenStreetMap', name='Modo Claro (Estándar)', control=True, show=False).add_to(mapa_calor)
         folium.TileLayer(
             tiles='https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
             attr='Google', subdomains=['mt0', 'mt1', 'mt2', 'mt3'],
-            name='Híbrido (Satélite)', control=True,
+            name='Híbrido (Satélite)', control=True, show=False,
         ).add_to(mapa_calor)
         
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
@@ -494,21 +574,63 @@ else:
                 for segmento_obj in datos['rutas']:
                     var_name = segmento_obj.get('variante', '').upper()
                     if filtro_variante != "Todas" and filtro_variante != var_name: continue
-                    folium.PolyLine(segmento_obj['trazado'], color="#aaaaaa", weight=1.5, opacity=0.5).add_to(mapa_calor)
+                    # Trazado OFICIAL completo del servicio, siempre visible en verde
+                    # (antes era una franja gris tenue de referencia; ahora es la
+                    # línea verde de "esto es lo que debía circular").
+                    folium.PolyLine(segmento_obj['trazado'], color="#2ca02c", weight=4, opacity=0.75,
+                                    tooltip=f"Trazado oficial — Línea {lbl}").add_to(mapa_calor)
 
-        eventos_completos = historial_ok_filtrado + alertas_filtradas
+        cluster_alertas = MarkerCluster(name="🚨 Alertas e Infracciones", disableClusteringAtZoom=16).add_to(mapa_calor)
 
-        for evt in eventos_completos:
+        for evt in alertas_filtradas:
+            seg_desviado = evt.get("Segmento_Desviado", [])
             segmento_infractor = evt.get("Segmento_Ruta", [])
-            if not segmento_infractor: segmento_infractor = [[evt["Latitud"], evt["Longitud"]], [evt["Latitud"]+0.0001, evt["Longitud"]+0.0001]]
-            if evt["Infracción"] == "Operación Normal":
-                folium.PolyLine(segmento_infractor, color="#2ca02c", weight=4, opacity=0.7).add_to(mapa_calor)
+
+            color_linea = "#ff7f0e" if "Terminal" in evt["Infracción"] else "#d62728"
+            icono_marker = "info-sign" if "Terminal" in evt["Infracción"] else "exclamation-triangle"
+
+            tramo_correcto = evt.get("Tramo Correcto", evt.get("Tramo Afectado", ""))
+            tramo_desviado = evt.get("Tramo Desviado", "")
+
+            if seg_desviado:
+                # ACORTE / ABANDONO: el trazado correcto ya está en verde (capa base);
+                # solo se dibuja encima el camino real (por calles, vía OSRM) que
+                # tomó el bus, que sale y vuelve a unirse al trazado oficial.
+                folium.PolyLine(seg_desviado, color="#d62728", weight=5, opacity=0.9,
+                                tooltip="Desviación real (acorte/abandono)").add_to(mapa_calor)
+                html_popup = (
+                    f"<div style='font-family: Arial; font-size: 13px; width: 260px;'>"
+                    f"<b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br>"
+                    f"<b>Línea:</b> {evt['Servicio']}<br>"
+                    f"<b>✅ Debía circular:</b> {tramo_correcto}<br>"
+                    f"<b>❌ Realizó:</b> {tramo_desviado}<br>"
+                    f"<b>Sector:</b> {evt['Sector Comuna']}<br>"
+                    f"<b>Patente:</b> {evt['Patente']}</div>"
+                )
             else:
-                color_linea = "#ff7f0e" if "Terminal" in evt["Infracción"] else "#d62728"
-                icono_marker = "info-sign" if "Terminal" in evt["Infracción"] else "exclamation-triangle"
-                html_popup = f"<div style='font-family: Arial; font-size: 13px; width: 240px;'><b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br><b>Línea:</b> {evt['Servicio']}<br><b>Calles/Rutas:</b> {evt['Tramo Afectado']}<br><b>Sector:</b> {evt['Sector Comuna']}<br><b>Patente:</b> {evt['Patente']}</div>"
-                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.85).add_to(mapa_calor)
-                folium.Marker(location=[evt["Latitud"], evt["Longitud"]], icon=folium.Icon(color="red" if color_linea=="#d62728" else "orange", icon=icono_marker, prefix='fa'), popup=folium.Popup(html_popup, max_width=280)).add_to(mapa_calor)
+                # TERMINAL / VELOCIDAD: el bus sigue sobre el trazado oficial, solo se
+                # resalta en rojo el tramo real puntual donde ocurrió la infracción
+                # (segmento_infractor ya viene de snap_punto_a_ruta, es calle real).
+                if not segmento_infractor:
+                    segmento_infractor = [[evt["Latitud"], evt["Longitud"]], [evt["Latitud"]+0.0001, evt["Longitud"]+0.0001]]
+                folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.9,
+                                tooltip=evt["Infracción"]).add_to(mapa_calor)
+                html_popup = (
+                    f"<div style='font-family: Arial; font-size: 13px; width: 240px;'>"
+                    f"<b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br>"
+                    f"<b>Línea:</b> {evt['Servicio']}<br>"
+                    f"<b>Calles/Rutas:</b> {evt.get('Tramo Afectado', '')}<br>"
+                    f"<b>Sector:</b> {evt['Sector Comuna']}<br>"
+                    f"<b>Patente:</b> {evt['Patente']}</div>"
+                )
+
+            # El marcador va en la posición REAL observada del bus (lat_actual/lon_actual,
+            # guardada en Latitud/Longitud), que es lo que se dibujó en rojo — antes
+            # quedaba en el punto corregido/verde, por eso se veía "fuera de lugar".
+            folium.Marker(location=[evt["Latitud"], evt["Longitud"]],
+                          icon=folium.Icon(color="red" if color_linea == "#d62728" else "orange",
+                                           icon=icono_marker, prefix='fa'),
+                          popup=folium.Popup(html_popup, max_width=300)).add_to(cluster_alertas)
             
         folium.LayerControl(position='topright', collapsed=False).add_to(mapa_calor)
         Fullscreen(position='topleft').add_to(mapa_calor)
@@ -521,15 +643,36 @@ else:
             df_alertas_f = pd.DataFrame(alertas_filtradas)
             df_abandonos = df_alertas_f[df_alertas_f["Infracción"].isin(["Abandono de Trazado", "Acorte/Cambio de Recorrido"])]
             if not df_abandonos.empty:
-                agrupado = df_abandonos.groupby(["Sector Comuna", "Tramo Afectado"]).agg(Servicios=('Servicio', lambda x: ", ".join(sorted(x.unique()))), Ultimo_Registro=('Hora Control', 'max')).reset_index()
+                agrupado = df_abandonos.groupby(["Sector Comuna", "Tramo Correcto", "Tramo Desviado"]).agg(
+                    Servicios=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
+                    Ultimo_Registro=('Hora Control', 'max')
+                ).reset_index()
                 for _, row in agrupado.iterrows():
-                    st.markdown(f"<div style='background-color: #1A0505; border: 1px solid #FF3333; border-left: 5px solid #FF3333; padding: 15px; border-radius: 5px; margin-bottom: 12px;'><h5 style='color: #FF3333; margin: 0 0 5px 0;'>🚨 ALERTA DE COBERTURA: EJE VIAL ABANDONADO</h5><p style='color: #E0E0E0; margin: 0;'>Sector: {row['Sector Comuna']} | Tramo: {row['Tramo Afectado']}</p></div>", unsafe_allow_html=True)
+                    tramo_correcto = row.get("Tramo Correcto", row.get("Tramo Afectado", ""))
+                    tramo_desviado = row.get("Tramo Desviado", "")
+                    warning_html = (
+                        f"<div style='background-color: #1A0505; border: 1px solid #FF3333; "
+                        f"border-left: 5px solid #FF3333; padding: 15px; border-radius: 5px; "
+                        f"margin-bottom: 12px;'>"
+                        f"<h5 style='color: #FF3333; margin: 0 0 5px 0;'>🚨 ALERTA DE COBERTURA: EJE VIAL ABANDONADO</h5>"
+                        f"<p style='color: #E0E0E0; margin: 0;'>"
+                        f"Sector: {row['Sector Comuna']}<br>"
+                        f"✅ <b>Debía circular:</b> {tramo_correcto}<br>"
+                    )
+                    if tramo_desviado and tramo_desviado != tramo_correcto:
+                        warning_html += f"❌ <b>Realizó desvío:</b> {tramo_desviado}<br>"
+                    warning_html += (
+                        f"🚌 <b>Servicios:</b> {row['Servicios']}<br>"
+                        f"🕐 {row['Ultimo_Registro']}"
+                        f"</p></div>"
+                    )
+                    st.markdown(warning_html, unsafe_allow_html=True)
             else:
                 st.success("✅ No se registran desvíos críticos.")
             
             st.markdown("---")
             st.subheader("Libro Estadístico de Infracciones Operativas")
-            columnas_a_quitar = ['Latitud', 'Longitud', 'Segmento_Ruta', 'oculta']
+            columnas_a_quitar = ['Latitud', 'Longitud', 'Segmento_Ruta', 'Segmento_Correcto', 'Segmento_Desviado', 'oculta']
             df_limpio = df_alertas_f.drop(columns=[c for c in columnas_a_quitar if c in df_alertas_f.columns], errors='ignore')
             st.dataframe(df_limpio, use_container_width=True)
             
@@ -538,7 +681,12 @@ else:
                 with pd.ExcelWriter(out, engine='openpyxl') as w:
                     df_completo.to_excel(w, index=False, sheet_name='Fiscalizacion_Detallada')
                     if not df_ab.empty:
-                        resumen = df_ab.groupby(["Sector Comuna", "Tramo Afectado"]).agg(Servicios_Ausentes=('Servicio', lambda x: ", ".join(sorted(x.unique()))), Casos_Registrados=('ID Alerta', 'count')).reset_index()
+                        grupo_cols = ["Sector Comuna", "Tramo Correcto", "Tramo Desviado"]
+                        grupo_existentes = [c for c in grupo_cols if c in df_ab.columns]
+                        resumen = df_ab.groupby(grupo_existentes).agg(
+                            Servicios_Ausentes=('Servicio', lambda x: ", ".join(sorted(x.unique()))),
+                            Casos_Registrados=('ID Alerta', 'count')
+                        ).reset_index()
                         resumen.to_excel(w, index=False, sheet_name='Resumen_Calles_Abandonadas')
                 return out.getvalue()
             
@@ -549,7 +697,7 @@ else:
         else:
             st.info("Inicie el motor de análisis en vivo para consolidar el reporte territorial.")
 
-    with tab3:
+    if vista_activa == etiquetas_tabs[2]:
         st.markdown("#### 🗄️ Consulta de Archivo Histórico Permanente (SQLite)")
         total_bd = contar_registros_archivados()
         st.caption(f"Total de registros archivados permanentemente: **{total_bd}**")
@@ -575,8 +723,8 @@ else:
         else:
             st.info("Aún no hay registros archivados en la base de datos.")
 
-    if es_admin:
-        with tabs[3]:
+    if es_admin and vista_activa == etiquetas_tabs[3]:
+        if True:
             st.markdown("#### 📊 Informe Ejecutivo — Solo Administrador")
             registros_completos = cargar_historico(limite=None)
             if not registros_completos:
