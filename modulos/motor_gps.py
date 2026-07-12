@@ -101,14 +101,12 @@ def _rutear_por_calles(puntos):
     return ruta
 
 
-def generar_desviacion(trazado, idx_inicio=None, idx_fin=None):
+def elegir_puntos_desviacion(trazado, idx_inicio=None, idx_fin=None):
     """
-    segmento_correcto: tramo REAL del trazado oficial de la línea.
-    segmento_desviado: camino REAL por calles (vía OSRM) que SALE del trazado
-    oficial en p_inicio y VUELVE a unírsele en p_fin (ambos puntos están sobre
-    la ruta real) — se fuerza un punto medio desviado hacia un costado para
-    que el camino calculado tome calles reales distintas, en vez de coincidir
-    exactamente con la ruta oficial o cortar en línea recta por manzanas.
+    Parte SIN red de la desviación: elige el tramo correcto real y el punto
+    medio desviado (offset perpendicular). No hace ninguna consulta a
+    internet, así que es instantánea — se puede llamar para los 20 buses
+    en el primer paso, sin esperar nada.
     """
     if idx_inicio is None:
         idx_inicio = random.randint(5, max(10, len(trazado) - 15))
@@ -125,17 +123,48 @@ def generar_desviacion(trazado, idx_inicio=None, idx_fin=None):
     dlat = p_fin[0] - p_inicio[0]
     dlon = p_fin[1] - p_inicio[1]
     largo = math.hypot(dlat, dlon) or 1e-9
-    perp_lat, perp_lon = -dlon / largo, dlat / largo  # vector perpendicular al trazado
-    offset = random.uniform(0.0008, 0.0018) * random.choice([-1, 1])
+    perp_lat, perp_lon = -dlon / largo, dlat / largo
+    offset = random.uniform(0.0006, 0.0013) * random.choice([-1, 1])
     punto_medio = [
         (p_inicio[0] + p_fin[0]) / 2 + perp_lat * offset,
         (p_inicio[1] + p_fin[1]) / 2 + perp_lon * offset,
     ]
 
-    ruta_real = _rutear_por_calles([p_inicio, punto_medio, p_fin])
-    segmento_desviado = ruta_real if ruta_real else [list(p_inicio), punto_medio, list(p_fin)]
+    return segmento_correcto, list(p_inicio), punto_medio, list(p_fin), idx_inicio, idx_fin
 
-    return segmento_correcto, segmento_desviado, idx_inicio, idx_fin
+
+def calcular_ruta_desviada(p_inicio, punto_medio, p_fin):
+    """
+    Parte CON red de la desviación, en 3 niveles de respaldo:
+    1) Intenta el camino real pasando por el punto medio desviado (fuerza un
+       detour visible que sale y vuelve a la ruta).
+    2) Si falla (el punto medio cae en una zona no navegable, timeout, etc.),
+       reintenta SOLO entre inicio y fin — como ambos son puntos reales de la
+       ruta oficial, esto casi siempre funciona y sigue siendo calle real,
+       aunque no muestre un desvío tan marcado.
+    3) Solo si también falla eso (sin internet), cae a una línea recta como
+       último recurso, para que la app nunca se rompa.
+    Devuelve (ruta, es_aproximado) — es_aproximado=True solo en el nivel 3,
+    para que el mapa la dibuje distinto (delgada/punteada) y no parezca una
+    calle real cuando en realidad es solo una aproximación.
+    """
+    ruta_real = _rutear_por_calles([p_inicio, punto_medio, p_fin])
+    if ruta_real:
+        return ruta_real, False
+
+    ruta_directa = _rutear_por_calles([p_inicio, p_fin])
+    if ruta_directa:
+        return ruta_directa, False
+
+    return [p_inicio, punto_medio, p_fin], True
+
+
+def generar_desviacion(trazado, idx_inicio=None, idx_fin=None):
+    """Versión combinada (sin paralelizar) — se mantiene por compatibilidad
+    si se llama fuera del flujo principal de panel_control.py."""
+    segmento_correcto, p_inicio, punto_medio, p_fin, idx_ini, idx_fin = elegir_puntos_desviacion(trazado, idx_inicio, idx_fin)
+    segmento_desviado = calcular_ruta_desviada(p_inicio, punto_medio, p_fin)
+    return segmento_correcto, segmento_desviado, idx_ini, idx_fin
 
 
 INTERSECCIONES_POR_SECTOR = {
@@ -195,7 +224,7 @@ INTERSECCIONES_POR_SECTOR = {
     ],
 }
 
-def _tramo_aproximado_por_sector(lat, lon, sector):
+def tramo_aproximado_por_sector(lat, lon, sector):
     """Respaldo cuando no hay internet o la geocodificación falla: intersección
     aproximada más cercana dentro del sector (menos precisa, pero no depende
     de conexión). Se usa como fallback, ya no como método principal."""
@@ -244,7 +273,7 @@ def obtener_calle_real(lat, lon, sector=None):
         calle = None
 
     if not calle:
-        calle = _tramo_aproximado_por_sector(lat, lon, sector or determinar_sector(lat, lon))
+        calle = tramo_aproximado_por_sector(lat, lon, sector or determinar_sector(lat, lon))
 
     _CACHE_GEOCODIFICACION[clave] = calle
     return calle

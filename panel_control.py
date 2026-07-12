@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 import folium
-from folium.plugins import Fullscreen, MarkerCluster, PolyLineTextPath, PolyLineTextPath
+from folium.plugins import Fullscreen, MarkerCluster
 from streamlit_folium import st_folium
 import random
 from datetime import datetime
@@ -10,11 +10,12 @@ import os
 
 # --- IMPORTACIÓN DE NUESTROS MÓDULOS SEPARADOS ---
 from modulos.ingesta_datos import extraer_coordenadas_kmz, cargar_padron_matricial
+import concurrent.futures
 from modulos.motor_gps import (
     snap_punto_a_ruta, evaluar_operacion, determinar_sector,
-    obtener_calle_real, generar_desviacion
+    obtener_calle_real, elegir_puntos_desviacion, calcular_ruta_desviada
 )
-from modulos.almacenamiento import init_db, guardar_evento, guardar_lote, contar_registros_archivados, cargar_historico
+from modulos.almacenamiento import init_db, guardar_evento, guardar_lote, contar_registros_archivados, cargar_historico, vaciar_historico
 from modulos.informes import calcular_metricas, generar_pdf_informe, grafico_barras
 
 init_db()  # Se asegura que el archivador SQLite exista antes de usarlo.
@@ -185,7 +186,7 @@ else:
         
         /* 6. BANNER INFERIOR FIJO */
         .banner-inferior { position: fixed; bottom: 0; left: 0; width: 100%; background-color: #0A132D; color: white; text-align: center; padding: 10px 0; font-weight: bold; z-index: 9999; border-top: 3px solid #EF3340; }
-        .block-container { padding-bottom: 70px !important; }
+        .block-container { padding-bottom: 70px !important; padding-top: 1.5rem !important; }
         </style>
         <div class="banner-inferior">MINISTERIO DE TRANSPORTES Y TELECOMUNICACIONES</div>
     """, unsafe_allow_html=True)
@@ -338,27 +339,26 @@ else:
 
             if df_padron is not None and not df_padron.empty:
                 flota_muestra = df_padron.sample(min(20, len(df_padron))) if len(df_padron) > 20 else df_padron
+                contextos_buses = []  # Fase 1: todo lo que NO necesita internet (rápido)
                 for _, fila in flota_muestra.iterrows():
                     patente = str(fila['Patente'])
                     linea_asignada = str(fila['Servicio_Oficial'])
                     es_electrico = fila.get('Es_Electrico', False)
-                    
-                    if linea_asignada not in lineas_dict: continue 
+
+                    if linea_asignada not in lineas_dict: continue
                     rutas_obj = lineas_dict[linea_asignada]['rutas']
                     paraderos_obj = lineas_dict[linea_asignada]['paraderos']
                     if not rutas_obj: continue
-                        
+
                     trazado_puntos = [pt for seg in rutas_obj for pt in seg['trazado']]
                     punto_base = random.choice(trazado_puntos)
-                    
+
                     if not es_horario_comercial: comportamiento = random.choices(["OK", "TERMINAL"], weights=[50, 50])[0]
                     else: comportamiento = random.choices(["OK", "TERMINAL", "ACORTE", "ABANDONO", "VELOCIDAD"], weights=[65, 5, 10, 10, 10])[0]
-                    
+
                     limite_zona = 50
                     segmento_correcto = []
-                    segmento_desviado = []
-                    tramo_correcto = ""
-                    tramo_desviado = ""
+                    p_inicio_desv, punto_medio_desv, p_fin_desv = None, None, None
 
                     if comportamiento == "OK":
                         lat_actual, lon_actual, vel = punto_base[0] + random.uniform(-0.0001, 0.0001), punto_base[1] + random.uniform(-0.0001, 0.0001), random.randint(25, 48)
@@ -366,41 +366,72 @@ else:
                         lat_actual, lon_actual, vel = (trazado_puntos[0][0], trazado_puntos[0][1], 0) if random.choice([True, False]) else (trazado_puntos[-1][0], trazado_puntos[-1][1], 0)
                     elif comportamiento == "VELOCIDAD":
                         lat_actual, lon_actual, vel = punto_base[0], punto_base[1], random.randint(55, 75)
-                    elif comportamiento == "ACORTE":
-                        seg_correcto, seg_desviado, idx_ini, idx_fin = generar_desviacion(trazado_puntos)
+                    elif comportamiento in ("ACORTE", "ABANDONO"):
+                        # Solo se ELIGEN los puntos acá (sin red); la consulta a OSRM
+                        # se hace después, en paralelo con la de todos los demás buses.
+                        seg_correcto, p_inicio_desv, punto_medio_desv, p_fin_desv, idx_ini, idx_fin = elegir_puntos_desviacion(trazado_puntos)
                         segmento_correcto = seg_correcto
-                        segmento_desviado = seg_desviado
-                        pt_desv = segmento_desviado[len(segmento_desviado) // 2]
-                        lat_actual, lon_actual = pt_desv[0], pt_desv[1]
-                        vel = random.randint(30, 48)
-                    elif comportamiento == "ABANDONO":
-                        seg_correcto, seg_desviado, idx_ini, idx_fin = generar_desviacion(trazado_puntos)
-                        segmento_correcto = seg_correcto
-                        segmento_desviado = seg_desviado
-                        pt_desv = segmento_desviado[len(segmento_desviado) // 2]
-                        lat_actual, lon_actual = pt_desv[0], pt_desv[1]
+                        lat_actual, lon_actual = punto_medio_desv[0], punto_medio_desv[1]
                         vel = random.randint(30, 48)
 
                     estado, dist_error = evaluar_operacion(lat_actual, lon_actual, rutas_obj, vel, limite_zona, paraderos_obj)
                     lat_snap, lon_snap, variante_exacta, trazado_infractor = snap_punto_a_ruta(lat_actual, lon_actual, rutas_obj)
-
-                    buses_calculados.append({"id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual, "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), "vel": vel, "limite": limite_zona, "electrico": es_electrico})
                     sector = determinar_sector(lat_snap, lon_snap)
 
-                    # La geocodificación real (obtener_calle_real) hace una consulta a
-                    # internet — antes se llamaba para los 20 buses en cada corrida,
-                    # incluidos los que están en "Operación Normal" (que ni siquiera
-                    # muestran ese dato en pantalla), y eso era lo que hacía tan lenta
-                    # toda la plataforma. Ahora solo se consulta para eventos con
-                    # alerta real, que normalmente son muchos menos por corrida.
-                    if estado == "Operación Normal":
-                        tramo_correcto = tramo_desviado = f"Sector {sector}"
+                    buses_calculados.append({"id": patente, "linea": linea_asignada, "lat": lat_actual, "lon": lon_actual, "estado": estado, "color": "green" if estado == "Operación Normal" else ("orange" if "Terminal" in estado else "red"), "vel": vel, "limite": limite_zona, "electrico": es_electrico})
+
+                    contextos_buses.append({
+                        "patente": patente, "linea_asignada": linea_asignada, "es_electrico": es_electrico,
+                        "comportamiento": comportamiento, "estado": estado, "variante_exacta": variante_exacta,
+                        "sector": sector, "lat_actual": lat_actual, "lon_actual": lon_actual,
+                        "lat_snap": lat_snap, "lon_snap": lon_snap, "trazado_infractor": trazado_infractor,
+                        "segmento_correcto": segmento_correcto,
+                        "p_inicio_desv": p_inicio_desv, "punto_medio_desv": punto_medio_desv, "p_fin_desv": p_fin_desv,
+                    })
+
+                # Fase 2: TODAS las consultas de red (geocodificación + OSRM) de golpe,
+                # en paralelo — antes eran ~20 consultas en fila, una por una, y eso
+                # era lo que hacía tan lenta la plataforma al iniciar el motor.
+                def _resolver_red(ctx):
+                    if ctx["estado"] == "Operación Normal":
+                        return f"Sector {ctx['sector']}", f"Sector {ctx['sector']}", [], False
+
+                    # Siempre calles reales (Nominatim + OSRM): solo aplica a las
+                    # alertas de esta corrida (normalmente pocas), no a los 20 buses,
+                    # por eso se mantiene razonablemente rápido.
+                    tramo_correcto = obtener_calle_real(ctx["lat_snap"], ctx["lon_snap"], ctx["sector"])
+                    if ctx["comportamiento"] in ("ACORTE", "ABANDONO"):
+                        segmento_desviado, es_aproximado = calcular_ruta_desviada(ctx["p_inicio_desv"], ctx["punto_medio_desv"], ctx["p_fin_desv"])
+                        # Se geocodifica un punto de la RUTA REAL que devolvió OSRM
+                        # (no el punto geométrico crudo) — así el texto "Realizó"
+                        # describe la calle por la que efectivamente pasa la línea
+                        # roja dibujada, evitando que diga la misma calle que
+                        # "Debía circular" cuando en realidad sí hay un desvío.
+                        punto_geocodificar = segmento_desviado[len(segmento_desviado) // 2]
+                        tramo_desviado = obtener_calle_real(punto_geocodificar[0], punto_geocodificar[1], ctx["sector"])
+                        if tramo_desviado == tramo_correcto:
+                            # Si aun así coincide (calle real corta o desvío muy leve),
+                            # se aclara en el texto en vez de mostrar una falsa
+                            # coincidencia sin contexto.
+                            tramo_desviado = f"{tramo_desviado} (tramo distinto de la misma calle)"
                     else:
-                        tramo_correcto = obtener_calle_real(lat_snap, lon_snap, sector)
-                        if comportamiento in ("ACORTE", "ABANDONO"):
-                            tramo_desviado = obtener_calle_real(lat_actual, lon_actual, sector)
-                        else:
-                            tramo_desviado = tramo_correcto
+                        tramo_desviado = tramo_correcto
+                        segmento_desviado, es_aproximado = [], False
+                    return tramo_correcto, tramo_desviado, segmento_desviado, es_aproximado
+
+                # Máximo 3 consultas a la vez, para respetar el límite de uso de
+                # Nominatim/OSRM (piden ~1 consulta/segundo) — mandar más en
+                # paralelo puede hacer que bloqueen temporalmente, dejando todo
+                # MÁS lento en vez de más rápido.
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    resultados_red = list(executor.map(_resolver_red, contextos_buses))
+
+                # Fase 3: ensamblar los eventos con los resultados ya resueltos (rápido)
+                for ctx, (tramo_correcto, tramo_desviado, segmento_desviado, es_aproximado) in zip(contextos_buses, resultados_red):
+                    patente = ctx["patente"]; linea_asignada = ctx["linea_asignada"]; es_electrico = ctx["es_electrico"]
+                    estado = ctx["estado"]; variante_exacta = ctx["variante_exacta"]; sector = ctx["sector"]
+                    lat_actual = ctx["lat_actual"]; lon_actual = ctx["lon_actual"]
+                    trazado_infractor = ctx["trazado_infractor"]; segmento_correcto = ctx["segmento_correcto"]
 
                     datos_evento = {
                         "ID Alerta": f"ALT-{random.randint(100,999)}", "Patente": patente,
@@ -415,6 +446,7 @@ else:
                         "Segmento_Ruta": trazado_infractor,
                         "Segmento_Correcto": segmento_correcto,
                         "Segmento_Desviado": segmento_desviado,
+                        "Es_Aproximado": es_aproximado,
                         "Es_Electrico": es_electrico,
                         "oculta": False
                     }
@@ -574,8 +606,14 @@ else:
         zoom_mapa = 13
         if st.session_state.alerta_focus is not None:
             centro_mapa = [st.session_state.alerta_focus["Latitud"], st.session_state.alerta_focus["Longitud"]]
-            zoom_mapa = 16 
-            st.info(f"📍 Mostrando en el mapa: **{st.session_state.alerta_focus['Infracción']}** de la patente **{st.session_state.alerta_focus['Patente']}**")
+            zoom_mapa = 16
+            col_info, col_btn = st.columns([4, 1])
+            with col_info:
+                st.info(f"📍 Mostrando solo: **{st.session_state.alerta_focus['Infracción']}** de la patente **{st.session_state.alerta_focus['Patente']}**")
+            with col_btn:
+                if st.button("↺ Ver todas", use_container_width=True):
+                    st.session_state.alerta_focus = None
+                    st.rerun()
         
         mapa_calor = folium.Map(location=centro_mapa, zoom_start=zoom_mapa, tiles=None)
         folium.TileLayer('CartoDB dark_matter', name='Modo Oscuro (Gris/Negro)', control=True, show=True).add_to(mapa_calor)
@@ -586,17 +624,34 @@ else:
             name='Híbrido (Satélite)', control=True, show=False,
         ).add_to(mapa_calor)
         
+        # Si hay una alerta enfocada (botón "Ver"), el trazado verde se limita a
+        # la LÍNEA Y VARIANTE exactas de esa alerta — antes solo filtraba por
+        # línea, y si esa línea tenía varias variantes (ida/vuelta u otros
+        # recorridos), se seguían mostrando todas mezcladas.
+        linea_en_foco = st.session_state.alerta_focus.get("Servicio") if st.session_state.alerta_focus is not None else None
+        variante_en_foco = st.session_state.alerta_focus.get("Variante", "").upper() if st.session_state.alerta_focus is not None else None
+
         for idx, (lbl, datos) in enumerate(lineas_dict.items()):
+            if linea_en_foco is not None and lbl != linea_en_foco: continue
             if filtro_linea == "Todas" or filtro_linea == lbl:
                 for segmento_obj in datos['rutas']:
                     var_name = segmento_obj.get('variante', '').upper()
+                    if variante_en_foco and variante_en_foco != "DESCONOCIDA" and var_name != variante_en_foco: continue
                     if filtro_variante != "Todas" and filtro_variante != var_name: continue
                     folium.PolyLine(segmento_obj['trazado'], color="#2ca02c", weight=4, opacity=0.75,
                                     tooltip=f"Trazado oficial — Línea {lbl}").add_to(mapa_calor)
 
         cluster_alertas = MarkerCluster(name="🚨 Alertas e Infracciones", disableClusteringAtZoom=16).add_to(mapa_calor)
 
-        for evt in alertas_filtradas:
+        # Si se llegó acá presionando "Ver" en una notificación, se muestra SOLO esa
+        # alerta (para que no se mezcle con el resto y sea clara). Sin foco, se ven
+        # todas las que pasan los filtros, como antes.
+        alertas_a_dibujar = alertas_filtradas
+        if st.session_state.alerta_focus is not None:
+            id_foco = st.session_state.alerta_focus.get("ID Alerta")
+            alertas_a_dibujar = [a for a in alertas_filtradas if a.get("ID Alerta") == id_foco]
+
+        for evt in alertas_a_dibujar:
             seg_desviado = evt.get("Segmento_Desviado", [])
             segmento_infractor = evt.get("Segmento_Ruta", [])
 
@@ -610,19 +665,26 @@ else:
                 # ACORTE / ABANDONO: el trazado correcto ya está en verde (capa base);
                 # solo se dibuja encima el camino real (por calles, vía OSRM) que
                 # tomó el bus, que sale y vuelve a unirse al trazado oficial.
-                linea_desvio = folium.PolyLine(seg_desviado, color="#d62728", weight=5, opacity=0.9,
-                                tooltip="Desviación real (acorte/abandono)").add_to(mapa_calor)
+                # Si OSRM no pudo resolverlo (Es_Aproximado=True), se dibuja delgada
+                # y punteada para no aparentar precisión que no se tiene.
+                es_aproximado = evt.get("Es_Aproximado", False)
+                dash = "10,8" if es_aproximado else None
+                linea_desvio = folium.PolyLine(
+                    seg_desviado, color="#d62728", weight=3 if es_aproximado else 5,
+                    opacity=0.6 if es_aproximado else 0.9, dash_array=dash,
+                    tooltip="Desviación aproximada (sin datos de calle)" if es_aproximado else "Desviación real (acorte/abandono)",
+                ).add_to(mapa_calor)
 
                 # Punto donde se sale del trazado oficial ("salida") y punto donde
                 # vuelve a unírsele ("reingreso") — para que quede claro el patrón
                 # "salió aquí, volvió acá" sin tener que seguir la línea con la vista.
                 folium.CircleMarker(
-                    location=seg_desviado[0], radius=6, color="#ffffff", weight=2,
+                    location=seg_desviado[0], radius=8, color="#ffffff", weight=3,
                     fill=True, fill_color="#d62728", fill_opacity=1,
                     tooltip="🔴 Salida del trazado oficial",
                 ).add_to(mapa_calor)
                 folium.CircleMarker(
-                    location=seg_desviado[-1], radius=6, color="#ffffff", weight=2,
+                    location=seg_desviado[-1], radius=8, color="#ffffff", weight=3,
                     fill=True, fill_color="#2ca02c", fill_opacity=1,
                     tooltip="🟢 Reingreso al trazado oficial",
                 ).add_to(mapa_calor)
@@ -644,6 +706,21 @@ else:
                     segmento_infractor = [[evt["Latitud"], evt["Longitud"]], [evt["Latitud"]+0.0001, evt["Longitud"]+0.0001]]
                 folium.PolyLine(segmento_infractor, color=color_linea, weight=5, opacity=0.9,
                                 tooltip=evt["Infracción"]).add_to(mapa_calor)
+
+                # Exceso de Velocidad: marcar dónde empezó y dónde terminó el tramo con
+                # exceso, para ver de un vistazo el largo real del tramo infringido
+                # (Terminal no lleva estos marcadores: es un punto fijo, no un tramo).
+                if "Exceso de Velocidad" in evt["Infracción"] and len(segmento_infractor) >= 2:
+                    folium.CircleMarker(
+                        location=segmento_infractor[0], radius=5, color="#ffffff", weight=2,
+                        fill=True, fill_color="#d62728", fill_opacity=1,
+                        tooltip="🔴 Inicio del exceso de velocidad",
+                    ).add_to(mapa_calor)
+                    folium.CircleMarker(
+                        location=segmento_infractor[-1], radius=5, color="#ffffff", weight=2,
+                        fill=True, fill_color="#ff7f0e", fill_opacity=1,
+                        tooltip="🟠 Término del exceso de velocidad",
+                    ).add_to(mapa_calor)
                 html_popup = (
                     f"<div style='font-family: Arial; font-size: 13px; width: 240px;'>"
                     f"<b style='color: {color_linea}; font-size: 14px;'>{evt['Infracción']}</b><br><br>"
@@ -735,7 +812,9 @@ else:
         with col_a:
             limite = st.number_input("Cantidad a mostrar", min_value=10, max_value=5000, value=200, step=50)
         with col_b:
-            tipo_filtro = st.selectbox("Filtrar por tipo", ["Todas", "OK", "ALERTA"])
+            etiqueta_a_valor = {"Todas": "Todas", "Operación Normal": "OK", "Alerta": "ALERTA"}
+            etiqueta_elegida = st.selectbox("Filtrar por tipo", list(etiqueta_a_valor.keys()))
+            tipo_filtro = etiqueta_a_valor[etiqueta_elegida]
 
         registros = cargar_historico(limite=limite)
         if tipo_filtro != "Todas":
@@ -743,6 +822,8 @@ else:
 
         if registros:
             df_historico = pd.DataFrame(registros).drop(columns=["segmento_ruta"], errors="ignore")
+            if "tipo" in df_historico.columns:
+                df_historico["tipo"] = df_historico["tipo"].replace({"OK": "Operación Normal", "ALERTA": "Alerta"})
             st.dataframe(df_historico, use_container_width=True)
             st.download_button(
                 "📥 Exportar Archivo Histórico a Excel (.xlsx)",
@@ -751,6 +832,16 @@ else:
             )
         else:
             st.info("Aún no hay registros archivados en la base de datos.")
+
+        if st.session_state.role == "admin":
+            st.markdown("---")
+            with st.expander("🗑️ Zona de riesgo: vaciar archivo histórico"):
+                st.warning("Esto borra **permanentemente** todos los registros archivados. No se puede deshacer.")
+                confirmar = st.text_input("Escribe BORRAR para confirmar:", key="confirmar_borrado_historico")
+                if st.button("🗑️ Vaciar Archivo Histórico Ahora", disabled=(confirmar != "BORRAR")):
+                    vaciar_historico()
+                    st.success("Archivo histórico vaciado.")
+                    st.rerun()
 
     if es_admin and vista_activa == etiquetas_tabs[3]:
         if True:

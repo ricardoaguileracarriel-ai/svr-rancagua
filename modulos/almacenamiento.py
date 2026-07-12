@@ -104,6 +104,19 @@ def contar_registros_archivados() -> int:
     return total
 
 
+def vaciar_historico():
+    """
+    Borra TODOS los registros de la tabla (irreversible). El archivo .db se
+    mantiene (no se elimina), solo queda vacío, listo para archivar de nuevo.
+    """
+    con = sqlite3.connect(DB_PATH)
+    con.execute("DELETE FROM registros_historicos")
+    con.commit()  # VACUUM no puede correr con una transacción abierta; por eso
+                  # se confirma el borrado ANTES, no después.
+    con.execute("VACUUM")
+    con.close()
+
+
 def cargar_historico(limite: int | None = 500) -> list[dict]:
     """Trae registros archivados. limite=None trae TODO el histórico (para informes)."""
     try:
